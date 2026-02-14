@@ -24,6 +24,7 @@ ${bold}Usage:${reset}
 
 ${bold}Options:${reset}
   --config <path>    Path to rule file ${dim}(default: .archtest.yml)${reset}
+  --base-dir <path>  Set root directory for scanning ${dim}(default: cwd)${reset}
   --verbose          Show all rules and per-file breakdown
   --skip <dirs>      Comma-separated directories to skip ${dim}(overrides config and defaults)${reset}
   --help, -h         Show this help message
@@ -35,6 +36,7 @@ ${bold}Commands:${reset}
   ${cyan}interview${reset}          Scan codebase and generate an architectural interview
 
 ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
+  --base-dir <path>        Set root directory for scanning ${dim}(default: cwd)${reset}
   --ext <exts>             Comma-separated file extensions to scan
                            ${dim}(default: .js,.ts,.jsx,.tsx,.mjs,.cjs)${reset}
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
@@ -108,6 +110,12 @@ ${dim}${'─'.repeat(50)}${reset}
   Override in config:  ${cyan}skip: [vendor, .git, __pycache__]${reset}
   Override on CLI:     ${cyan}--skip vendor,.git,__pycache__${reset}
   Priority: CLI > config > defaults
+
+${bold}Base Directory${reset}
+${dim}${'─'.repeat(50)}${reset}
+  Default: current working directory
+  Override with: ${cyan}--base-dir src/${reset}
+  Scans and groups directories relative to the specified path.
 
 ${bold}Exit Codes${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -242,6 +250,7 @@ rules:
 function parseFlags(args) {
   let skipDirs = null;
   let extensions = null;
+  let baseDir = null;
   const importPatterns = [];
   const remaining = [];
 
@@ -255,6 +264,9 @@ function parseFlags(args) {
     } else if (args[i] === '--import-pattern' && args[i + 1]) {
       importPatterns.push(new RegExp(args[i + 1], 'g'));
       i++;
+    } else if (args[i] === '--base-dir' && args[i + 1]) {
+      baseDir = path.resolve(args[i + 1]);
+      i++;
     } else {
       remaining.push(args[i]);
     }
@@ -265,12 +277,13 @@ function parseFlags(args) {
     skipFromCli: skipDirs !== null,
     extensions: extensions || DEFAULT_EXTENSIONS,
     importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
+    baseDir,
     remaining,
   };
 }
 
 function runInterview(flags) {
-  const baseDir = process.cwd();
+  const baseDir = flags.baseDir || process.cwd();
   const scan = scanCodebase(baseDir, {
     extensions: flags.extensions,
     importPatterns: flags.importPatterns,
@@ -320,7 +333,7 @@ function main() {
     skipDirs = new Set(config.skip);
   }
 
-  const baseDir = process.cwd();
+  const baseDir = flags.baseDir || process.cwd();
   const results = runRules(config.rules, baseDir, { skipDirs });
   const output = formatResults(results, { verbose, baseDir });
 

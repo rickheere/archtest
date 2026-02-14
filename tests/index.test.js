@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, DEFAULT_SKIP_DIRS } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, DEFAULT_SKIP_DIRS } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -235,5 +235,54 @@ describe('DEFAULT_SKIP_DIRS', () => {
     for (const dir of ['node_modules', '.git', '.next', 'dist', 'build', '_generated', 'coverage', '.turbo', '.cache']) {
       assert.ok(DEFAULT_SKIP_DIRS.has(dir), `Expected DEFAULT_SKIP_DIRS to include "${dir}"`);
     }
+  });
+});
+
+describe('scanCodebase', () => {
+  it('groups files by top-level directory relative to baseDir', () => {
+    const scan = scanCodebase(projectDir);
+    const dirNames = [...scan.directories.keys()].sort();
+    assert.ok(dirNames.includes('strategies'));
+    assert.ok(dirNames.includes('.'));  // root-level files
+  });
+
+  it('uses subdirectory as baseDir to regroup directories', () => {
+    const subDir = path.join(projectDir, 'strategies');
+    const scan = scanCodebase(subDir);
+    const dirNames = [...scan.directories.keys()].sort();
+    // When scanning from strategies/, workshop-v3 becomes a top-level directory
+    assert.ok(dirNames.includes('workshop-v3'));
+    // Should not contain 'strategies' since we're inside it
+    assert.ok(!dirNames.includes('strategies'));
+  });
+
+  it('returns source files relative to baseDir', () => {
+    const subDir = path.join(projectDir, 'strategies');
+    const scan = scanCodebase(subDir);
+    // Files should be found inside the subdirectory
+    assert.ok(scan.sourceFiles.length > 0);
+    // All files should be under the subDir
+    for (const file of scan.sourceFiles) {
+      assert.ok(file.startsWith(subDir), `${file} should start with ${subDir}`);
+    }
+  });
+});
+
+describe('formatInterview', () => {
+  it('produces output with directory structure section', () => {
+    const scan = scanCodebase(projectDir);
+    const output = formatInterview(scan, projectDir);
+    assert.ok(output.includes('Directory Structure'));
+    assert.ok(output.includes('strategies/'));
+  });
+
+  it('shows clean directory labels when using subdirectory as baseDir', () => {
+    const subDir = path.join(projectDir, 'strategies');
+    const scan = scanCodebase(subDir);
+    const output = formatInterview(scan, subDir);
+    assert.ok(output.includes('Directory Structure'));
+    assert.ok(output.includes('workshop-v3/'));
+    // Should not contain '../' paths
+    assert.ok(!output.includes('../'));
   });
 });
