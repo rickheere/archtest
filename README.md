@@ -31,6 +31,10 @@ The agent will:
 3. Write `.archtest.yml` rules based on your answers (using `archtest schema` and `archtest examples`)
 4. Run `archtest` to verify the rules pass (or catch existing violations)
 
+<p align="center">
+  <img src="screenshot.png" alt="archtest interview output" width="700">
+</p>
+
 ## Manual Setup
 
 ```
