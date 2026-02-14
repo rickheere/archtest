@@ -1,0 +1,10 @@
+{
+  "name": "archtest",
+  "description": "AI-first architectural boundary testing",
+  "version": "0.2.0",
+  "author": {
+    "name": "Rick Heere"
+  },
+  "license": "MIT",
+  "keywords": ["architecture", "testing", "boundaries", "drift-detection"]
+}

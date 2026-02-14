@@ -14,17 +14,9 @@ So boundaries erode. With AI coding agents it's worse — they don't smell archi
 
 LLMs write grep patterns like humans write sentences. The LLM authors the rules, the human reviews them, the test runner executes them. The human never touches regex.
 
-## Install
-
-```
-npm install archtest
-```
-
-Or run directly:
-
-```
-npx archtest
-```
+<p align="center">
+  <img src="logo.jpg" alt="archtest logo" width="400">
+</p>
 
 ## Quick Start
 
@@ -100,6 +92,18 @@ archtest exits with code 1 on failure — add it to your test pipeline:
 | `archtest schema` | Show the YAML rule file schema |
 | `archtest examples` | Show example rules for common patterns |
 | `archtest init` | Generate a starter .archtest.yml |
+
+## Install
+
+```
+npm install archtest
+```
+
+Or run directly without installing:
+
+```
+npx archtest
+```
 
 ## Philosophy
 
