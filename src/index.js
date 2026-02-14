@@ -5,7 +5,8 @@ const { minimatch } = require('minimatch');
 const pkg = require('../package.json');
 
 /**
- * Parse a YAML rule file and return the rules array.
+ * Parse a YAML rule file and return the config object.
+ * Returns { rules, skip } where skip is an optional array of directory names.
  */
 function parseRuleFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
@@ -13,13 +14,21 @@ function parseRuleFile(filePath) {
   if (!doc || !Array.isArray(doc.rules)) {
     throw new Error(`Invalid rule file: expected a "rules" array in ${filePath}`);
   }
-  return doc.rules;
+  const result = { rules: doc.rules };
+  if (Array.isArray(doc.skip)) {
+    result.skip = doc.skip;
+  }
+  return result;
 }
 
 /**
  * Default directories to skip during scanning.
  */
-const DEFAULT_SKIP_DIRS = new Set(['node_modules', '.git']);
+const DEFAULT_SKIP_DIRS = new Set([
+  'node_modules', '.git',
+  '.next', 'dist', 'build', '_generated',
+  'coverage', '.turbo', '.cache',
+]);
 
 /**
  * Resolve glob patterns to actual file paths relative to baseDir.

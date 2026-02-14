@@ -25,7 +25,7 @@ ${bold}Usage:${reset}
 ${bold}Options:${reset}
   --config <path>    Path to rule file ${dim}(default: .archtest.yml)${reset}
   --verbose          Show all rules and per-file breakdown
-  --skip <dirs>      Comma-separated directories to skip ${dim}(default: node_modules,.git)${reset}
+  --skip <dirs>      Comma-separated directories to skip ${dim}(overrides config and defaults)${reset}
   --help, -h         Show this help message
 
 ${bold}Commands:${reset}
@@ -39,7 +39,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
                            ${dim}(default: .js,.ts,.jsx,.tsx,.mjs,.cjs)${reset}
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Default: JS require/import patterns.${reset}
-  --skip <dirs>            Comma-separated directories to skip ${dim}(default: node_modules,.git)${reset}
+  --skip <dirs>            Comma-separated directories to skip ${dim}(overrides config and defaults)${reset}
 
 ${yellow}AI-first architectural testing.${reset} Define boundaries in YAML, enforce
 them with grep-based pattern matching. Rules are designed to be
@@ -56,6 +56,11 @@ function showSchema() {
   console.log(`
 ${bold}YAML Rule File Schema${reset} ${dim}(.archtest.yml)${reset}
 ${dim}${'─'.repeat(50)}${reset}
+
+${bold}skip:${reset}                            ${dim}# Optional. Array of directory names to skip.${reset}
+  - .next                        ${dim}# Overrides the default skip list when present.${reset}
+  - dist                         ${dim}# CLI --skip overrides this config value.${reset}
+  - _generated
 
 ${bold}rules:${reset}                           ${dim}# Required. Array of rule objects.${reset}
   - ${bold}name:${reset} <string>               ${dim}# Required. Unique identifier for the rule.${reset}
@@ -98,8 +103,11 @@ ${dim}${'─'.repeat(50)}${reset}
 
 ${bold}Skipped Directories${reset}
 ${dim}${'─'.repeat(50)}${reset}
-  Default: node_modules, .git
-  Override with: ${cyan}--skip vendor,.git,__pycache__${reset}
+  Default: node_modules, .git, .next, dist, build, _generated,
+           coverage, .turbo, .cache
+  Override in config:  ${cyan}skip: [vendor, .git, __pycache__]${reset}
+  Override on CLI:     ${cyan}--skip vendor,.git,__pycache__${reset}
+  Priority: CLI > config > defaults
 
 ${bold}Exit Codes${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -182,7 +190,15 @@ function runInit() {
     process.exit(1);
   }
 
-  const template = `rules:
+  const template = `# Directories to skip during scanning (overrides defaults).
+# Default: node_modules, .git, .next, dist, build, _generated, coverage, .turbo, .cache
+# Uncomment to customize:
+# skip:
+#   - node_modules
+#   - .git
+#   - vendor
+
+rules:
   # Example: prevent deep imports into a module
   # Outsiders should only import through the barrel (index) file.
   #
@@ -221,7 +237,7 @@ function runInit() {
 
 /**
  * Parse shared flags from args array.
- * Returns { skipDirs, extensions, importPatterns, remaining }
+ * Returns { skipDirs, skipFromCli, extensions, importPatterns, remaining }
  */
 function parseFlags(args) {
   let skipDirs = null;
@@ -246,6 +262,7 @@ function parseFlags(args) {
 
   return {
     skipDirs: skipDirs || DEFAULT_SKIP_DIRS,
+    skipFromCli: skipDirs !== null,
     extensions: extensions || DEFAULT_EXTENSIONS,
     importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
     remaining,
@@ -289,16 +306,22 @@ function main() {
     }
   }
 
-  let rules;
+  let config;
   try {
-    rules = parseRuleFile(configPath);
+    config = parseRuleFile(configPath);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
   }
 
+  // Priority: CLI --skip > config skip > DEFAULT_SKIP_DIRS
+  let skipDirs = flags.skipDirs;
+  if (!flags.skipFromCli && config.skip) {
+    skipDirs = new Set(config.skip);
+  }
+
   const baseDir = process.cwd();
-  const results = runRules(rules, baseDir, { skipDirs: flags.skipDirs });
+  const results = runRules(config.rules, baseDir, { skipDirs });
   const output = formatResults(results, { verbose, baseDir });
 
   console.log(output);

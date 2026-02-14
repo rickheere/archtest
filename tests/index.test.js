@@ -1,25 +1,36 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, DEFAULT_SKIP_DIRS } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
 
 describe('parseRuleFile', () => {
   it('parses a valid YAML rule file', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
-    assert.strictEqual(rules.length, 1);
-    assert.strictEqual(rules[0].name, 'no-console-in-utils');
-    assert.deepStrictEqual(rules[0].scope.files, ['utils.ts']);
-    assert.deepStrictEqual(rules[0].deny.patterns, ['console\\.log']);
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
+    assert.strictEqual(config.rules.length, 1);
+    assert.strictEqual(config.rules[0].name, 'no-console-in-utils');
+    assert.deepStrictEqual(config.rules[0].scope.files, ['utils.ts']);
+    assert.deepStrictEqual(config.rules[0].deny.patterns, ['console\\.log']);
   });
 
   it('parses a file with multiple rules', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-mixed.yml'));
-    assert.strictEqual(rules.length, 2);
-    assert.strictEqual(rules[0].name, 'no-console-in-utils');
-    assert.strictEqual(rules[1].name, 'no-strategy-internals-in-orchestrator');
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-mixed.yml'));
+    assert.strictEqual(config.rules.length, 2);
+    assert.strictEqual(config.rules[0].name, 'no-console-in-utils');
+    assert.strictEqual(config.rules[1].name, 'no-strategy-internals-in-orchestrator');
+  });
+
+  it('returns skip dirs from config', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-with-skip.yml'));
+    assert.deepStrictEqual(config.skip, ['.next', '_generated', 'dist']);
+    assert.strictEqual(config.rules.length, 1);
+  });
+
+  it('omits skip when not in config', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
+    assert.strictEqual(config.skip, undefined);
   });
 
   it('throws on invalid file', () => {
@@ -72,7 +83,7 @@ describe('checkFile', () => {
 
 describe('runRules', () => {
   it('reports all pass when no violations', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
+    const { rules } = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
     const results = runRules(rules, projectDir);
     assert.strictEqual(results.length, 1);
     assert.strictEqual(results[0].passed, true);
@@ -80,7 +91,7 @@ describe('runRules', () => {
   });
 
   it('reports failures when violations exist', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-failing.yml'));
+    const { rules } = parseRuleFile(path.join(fixturesDir, 'rules-failing.yml'));
     const results = runRules(rules, projectDir);
     assert.strictEqual(results.length, 1);
     assert.strictEqual(results[0].passed, false);
@@ -88,7 +99,7 @@ describe('runRules', () => {
   });
 
   it('handles mixed pass and fail', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-mixed.yml'));
+    const { rules } = parseRuleFile(path.join(fixturesDir, 'rules-mixed.yml'));
     const results = runRules(rules, projectDir);
     assert.strictEqual(results.length, 2);
     assert.strictEqual(results[0].passed, true);  // no-console-in-utils
@@ -96,7 +107,7 @@ describe('runRules', () => {
   });
 
   it('excludes files matching exclude patterns', () => {
-    const rules = parseRuleFile(path.join(fixturesDir, 'rules-exclude.yml'));
+    const { rules } = parseRuleFile(path.join(fixturesDir, 'rules-exclude.yml'));
     const results = runRules(rules, projectDir);
     assert.strictEqual(results.length, 1);
     // strategy.ts inside strategies/workshop-v3/ should be excluded,
@@ -216,5 +227,13 @@ describe('formatResults', () => {
     ];
     const output = formatResults(results, { verbose: true, baseDir: projectDir });
     assert.ok(output.includes('2 files scanned, all clean'));
+  });
+});
+
+describe('DEFAULT_SKIP_DIRS', () => {
+  it('includes common build directories', () => {
+    for (const dir of ['node_modules', '.git', '.next', 'dist', 'build', '_generated', 'coverage', '.turbo', '.cache']) {
+      assert.ok(DEFAULT_SKIP_DIRS.has(dir), `Expected DEFAULT_SKIP_DIRS to include "${dir}"`);
+    }
   });
 });
