@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const { minimatch } = require('minimatch');
+const pkg = require('../package.json');
 
 /**
  * Parse a YAML rule file and return the rules array.
@@ -149,7 +150,7 @@ function formatResults(results, { verbose = false, baseDir = process.cwd() } = {
 
   const lines = [];
   lines.push('');
-  lines.push(`${dim}archtest v0.1.0 \u2014 ${results.length} rule${results.length === 1 ? '' : 's'}${reset}`);
+  lines.push(`${dim}archtest v${pkg.version} \u2014 ${results.length} rule${results.length === 1 ? '' : 's'}${reset}`);
   lines.push('');
 
   for (const result of results) {
