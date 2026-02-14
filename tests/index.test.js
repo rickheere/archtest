@@ -115,30 +115,30 @@ describe('runRules', () => {
 describe('formatResults', () => {
   it('shows summary line with rule count', () => {
     const results = [
-      { rule: 'test-rule', passed: true, violations: [] },
+      { rule: 'test-rule', passed: true, violations: [], files: [] },
     ];
     const output = formatResults(results, { verbose: true, baseDir: projectDir });
-    assert.ok(output.includes('checking 1 rule'));
+    assert.ok(output.includes('1 rule'));
   });
 
-  it('shows PASS for passing rules in verbose mode', () => {
+  it('shows checkmark for passing rules', () => {
     const results = [
-      { rule: 'test-rule', passed: true, violations: [] },
+      { rule: 'test-rule', passed: true, violations: [], files: [] },
     ];
     const output = formatResults(results, { verbose: true, baseDir: projectDir });
-    assert.ok(output.includes('PASS'));
+    assert.ok(output.includes('\u2713'));
     assert.ok(output.includes('test-rule'));
   });
 
-  it('hides passing rules in non-verbose mode', () => {
+  it('always shows all rules including passing ones', () => {
     const results = [
-      { rule: 'passing-rule', passed: true, violations: [] },
+      { rule: 'passing-rule', passed: true, violations: [], files: [] },
     ];
     const output = formatResults(results, { verbose: false, baseDir: projectDir });
-    assert.ok(!output.includes('passing-rule'));
+    assert.ok(output.includes('passing-rule'));
   });
 
-  it('shows FAIL with violations', () => {
+  it('shows cross mark with violations', () => {
     const results = [
       {
         rule: 'fail-rule',
@@ -146,10 +146,19 @@ describe('formatResults', () => {
         violations: [
           { file: path.join(projectDir, 'foo.ts'), line: 10, match: 'bad code', pattern: 'bad' },
         ],
+        files: [
+          {
+            file: path.join(projectDir, 'foo.ts'),
+            passed: false,
+            violations: [
+              { file: path.join(projectDir, 'foo.ts'), line: 10, match: 'bad code', pattern: 'bad' },
+            ],
+          },
+        ],
       },
     ];
     const output = formatResults(results, { baseDir: projectDir });
-    assert.ok(output.includes('FAIL'));
+    assert.ok(output.includes('\u2717'));
     assert.ok(output.includes('fail-rule'));
     assert.ok(output.includes('foo.ts:10'));
     assert.ok(output.includes('bad code'));
@@ -157,10 +166,55 @@ describe('formatResults', () => {
 
   it('shows correct totals', () => {
     const results = [
-      { rule: 'pass1', passed: true, violations: [] },
-      { rule: 'fail1', passed: false, violations: [{ file: '/f', line: 1, match: 'x', pattern: 'x' }] },
+      { rule: 'pass1', passed: true, violations: [], files: [] },
+      { rule: 'fail1', passed: false, violations: [{ file: '/f', line: 1, match: 'x', pattern: 'x' }], files: [] },
     ];
     const output = formatResults(results, { verbose: true, baseDir: '/' });
-    assert.ok(output.includes('1 passed, 1 failed'));
+    assert.ok(output.includes('1 passed'));
+    assert.ok(output.includes('1 failed'));
+  });
+
+  it('shows per-file breakdown in verbose mode', () => {
+    const cleanFile = path.join(projectDir, 'clean.ts');
+    const dirtyFile = path.join(projectDir, 'dirty.ts');
+    const results = [
+      {
+        rule: 'test-rule',
+        description: 'Test description',
+        passed: false,
+        violations: [
+          { file: dirtyFile, line: 5, match: 'bad import', pattern: 'bad' },
+        ],
+        files: [
+          { file: cleanFile, passed: true, violations: [] },
+          { file: dirtyFile, passed: false, violations: [
+            { file: dirtyFile, line: 5, match: 'bad import', pattern: 'bad' },
+          ]},
+        ],
+      },
+    ];
+    const output = formatResults(results, { verbose: true, baseDir: projectDir });
+    assert.ok(output.includes('Test description'));
+    assert.ok(output.includes('clean.ts'));
+    assert.ok(output.includes('dirty.ts'));
+    assert.ok(output.includes('2 files scanned'));
+    assert.ok(output.includes('1 violation'));
+  });
+
+  it('shows all-clean message for passing rules in verbose mode', () => {
+    const results = [
+      {
+        rule: 'clean-rule',
+        description: 'Everything is fine',
+        passed: true,
+        violations: [],
+        files: [
+          { file: path.join(projectDir, 'a.ts'), passed: true, violations: [] },
+          { file: path.join(projectDir, 'b.ts'), passed: true, violations: [] },
+        ],
+      },
+    ];
+    const output = formatResults(results, { verbose: true, baseDir: projectDir });
+    assert.ok(output.includes('2 files scanned, all clean'));
   });
 });

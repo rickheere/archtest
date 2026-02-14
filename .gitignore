@@ -2,3 +2,7 @@ node_modules/
 dist/
 .beads/
 .nauvis/
+# bd worktree
+.nauvis/worktrees/archtest-3yf/
+# bd worktree
+.nauvis/worktrees/archtest-a4g/

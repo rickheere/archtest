@@ -1,0 +1,20 @@
+{
+  "name": "archtest",
+  "owner": {
+    "name": "archtest"
+  },
+  "metadata": {
+    "description": "Architectural drift detection through declarative rules",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "archtest",
+      "description": "AI-first architectural boundary testing",
+      "source": "./",
+      "skills": [
+        "./skills/archtest"
+      ]
+    }
+  ]
+}
