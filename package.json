@@ -1,0 +1,14 @@
+{
+  "name": "archtest",
+  "version": "0.1.0",
+  "description": "Architectural drift detection through declarative rules",
+  "main": "src/index.js",
+  "bin": {
+    "archtest": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "keywords": ["architecture", "testing", "linting", "boundaries"],
+  "license": "MIT"
+}
