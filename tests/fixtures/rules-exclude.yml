@@ -1,0 +1,9 @@
+rules:
+  - name: no-strategy-states-outside-strategy
+    description: "No outside file should reference strategy state constants"
+    scope:
+      files: ["**/*.ts"]
+      exclude: ["strategies/workshop-v3/**"]
+    deny:
+      patterns:
+        - "ENTRY_1|ENTRY_2|PENDING_ENTRY"

@@ -1,0 +1,8 @@
+rules:
+  - name: no-console-in-utils
+    description: "Utils should not use console.log"
+    scope:
+      files: ["utils.ts"]
+    deny:
+      patterns:
+        - "console\\.log"

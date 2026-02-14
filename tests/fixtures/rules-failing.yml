@@ -1,0 +1,9 @@
+rules:
+  - name: no-strategy-internals-in-orchestrator
+    description: "The orchestrator must not reference strategy-specific concepts"
+    scope:
+      files: ["orchestrator.ts"]
+    deny:
+      patterns:
+        - "ENTRY_1|ENTRY_2|ENTRY_3|PENDING_ENTRY"
+        - "tpPrice|entry2Target|entry3Target"

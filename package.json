@@ -7,8 +7,17 @@
     "archtest": "src/cli.js"
   },
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test 'tests/**/*.test.js'"
   },
-  "keywords": ["architecture", "testing", "linting", "boundaries"],
-  "license": "MIT"
+  "keywords": [
+    "architecture",
+    "testing",
+    "linting",
+    "boundaries"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.1",
+    "minimatch": "^10.2.0"
+  }
 }
