@@ -1,0 +1,18 @@
+# Internal tooling
+.beads/
+.nauvis/
+.claude-plugin/
+.gitattributes
+skills/
+
+# Docs & images (referenced via GitHub URLs)
+logo.jpg
+screenshot.png
+AGENTS.md
+CONTRIBUTING.md
+
+# Tests
+tests/
+
+# Git
+.git/
