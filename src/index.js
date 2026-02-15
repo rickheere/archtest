@@ -311,7 +311,7 @@ function extractImports(filePath, importPatterns) {
 
 /**
  * Resolve a relative import to a source file path relative to baseDir.
- * Tries the exact path, then with each extension, then as a directory index.
+ * Tries the exact path, then with each extension.
  * Returns the relative path from baseDir, or null if it resolves outside baseDir.
  */
 function resolveImportPath(importStr, importingFile, baseDir, extensions, sourceFileSet) {
@@ -331,12 +331,6 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
     if (sourceFileSet.has(withExt)) return withExt;
   }
 
-  // Try as directory index
-  for (const ext of extensions) {
-    const indexFile = path.join(rel, `index${ext}`);
-    if (sourceFileSet.has(indexFile)) return indexFile;
-  }
-
   // Can't resolve to a known source file — return raw relative path
   return rel;
 }
@@ -347,7 +341,7 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
  *
  * Checks the import against a sorted list of alias prefixes (longest first).
  * If matched, strips the prefix, prepends the alias target directory, and
- * tries exact match → +extension → /index (same resolution as relative imports).
+ * tries exact match → +extension (same resolution as relative imports).
  *
  * @returns {string|null} Resolved relative path, or null if no alias matched.
  */
@@ -372,12 +366,6 @@ function resolveAliasImport(importStr, aliases, baseDir, extensions, sourceFileS
     for (const ext of extensions) {
       const withExt = rel + ext;
       if (sourceFileSet.has(withExt)) return withExt;
-    }
-
-    // Try as directory index
-    for (const ext of extensions) {
-      const indexFile = path.join(rel, `index${ext}`);
-      if (sourceFileSet.has(indexFile)) return indexFile;
     }
 
     // Alias matched but can't resolve to a known source file — return mapped path
@@ -1014,6 +1002,6 @@ module.exports = {
   getParentModule, getImportAnnotation,
   detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
-  resolveAliasImport,
+  resolveAliasImport, resolveImportPath,
   DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES,
 };

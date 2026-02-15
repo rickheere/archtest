@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, resolveImportPath, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -1596,10 +1596,11 @@ describe('resolveAliasImport', () => {
     assert.strictEqual(result, 'config.ts');
   });
 
-  it('resolves alias to directory index file', () => {
+  it('does not resolve alias to directory index file', () => {
     const setWithIndex = new Set([...sourceFileSet, 'lib/index.ts']);
     const result = resolveAliasImport('~/lib', DEFAULT_ALIASES, '/base', extensions, setWithIndex);
-    assert.strictEqual(result, 'lib/index.ts');
+    assert.notStrictEqual(result, 'lib/index.ts', 'Should not resolve to index file (JS-specific convention)');
+    assert.strictEqual(result, 'lib');
   });
 
   it('returns null for non-alias imports', () => {
@@ -1752,5 +1753,43 @@ describe('interview with aliases (CLI)', () => {
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('aliases'));
+  });
+});
+
+describe('resolveImportPath (no index file resolution)', () => {
+  it('does not resolve directory imports to index files', () => {
+    const baseDir = projectDir;
+    const importingFile = path.join(projectDir, 'orchestrator.ts');
+    const sourceFileSet = new Set([
+      'orchestrator.ts',
+      'utils.ts',
+      path.join('strategies', 'workshop-v3', 'index.ts'),
+      path.join('strategies', 'workshop-v3', 'strategy.ts'),
+    ]);
+    // Import './strategies/workshop-v3' should NOT resolve to strategies/workshop-v3/index.ts
+    const result = resolveImportPath('./strategies/workshop-v3', importingFile, baseDir, JS_TS_EXT, sourceFileSet);
+    assert.notStrictEqual(
+      result,
+      path.join('strategies', 'workshop-v3', 'index.ts'),
+      'Should not resolve directory import to index file (JS-specific convention)'
+    );
+    // Should return the raw relative path instead
+    assert.strictEqual(result, path.join('strategies', 'workshop-v3'));
+  });
+
+  it('still resolves extensionless imports to files with extensions', () => {
+    const baseDir = projectDir;
+    const importingFile = path.join(projectDir, 'orchestrator.ts');
+    const sourceFileSet = new Set(['orchestrator.ts', 'utils.ts']);
+    const result = resolveImportPath('./utils', importingFile, baseDir, JS_TS_EXT, sourceFileSet);
+    assert.strictEqual(result, 'utils.ts');
+  });
+
+  it('still resolves exact file matches', () => {
+    const baseDir = projectDir;
+    const importingFile = path.join(projectDir, 'orchestrator.ts');
+    const sourceFileSet = new Set(['orchestrator.ts', 'utils.ts']);
+    const result = resolveImportPath('./utils.ts', importingFile, baseDir, JS_TS_EXT, sourceFileSet);
+    assert.strictEqual(result, 'utils.ts');
   });
 });
