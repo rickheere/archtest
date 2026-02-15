@@ -940,6 +940,36 @@ const IMPORT_PATTERN_HINTS = {
 };
 
 /**
+ * Find a sample import-like line from a list of files.
+ * Reads the first N lines of files matching given extensions, looking for
+ * lines that look like imports (contain keywords like import/use/require/include/from).
+ * Returns the first matching line (trimmed), or null.
+ */
+function findSampleImportLine(files, extensions, skipDirs) {
+  const importKeywords = /\b(import|require|use|include|from|load|using)\b/;
+  const maxFiles = 20;
+  const maxLines = 40;
+  const matching = extensions
+    ? files.filter((f) => extensions.has(path.extname(f)))
+    : files;
+  for (let i = 0; i < Math.min(matching.length, maxFiles); i++) {
+    try {
+      const content = fs.readFileSync(matching[i], 'utf8');
+      const lines = content.split('\n');
+      for (let j = 0; j < Math.min(lines.length, maxLines); j++) {
+        const line = lines[j].trim();
+        if (line && !line.startsWith('//') && !line.startsWith('#!') && importKeywords.test(line)) {
+          return line;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
  * Detect distinct language families from an extension count map.
  * Returns a Set of family names found.
  */
@@ -1004,7 +1034,7 @@ module.exports = {
   scanCodebase, formatInterview, formatPaginatedInterview,
   getParentModule, getImportAnnotation,
   detectSuspiciousDirs, filterScanResults,
-  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
+  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, findSampleImportLine,
   resolveAliasImport, resolveImportPath,
   DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES, IMPORT_PATTERN_HINTS,
 };

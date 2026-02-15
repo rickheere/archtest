@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, resolveImportPath, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, findSampleImportLine, resolveAliasImport, resolveImportPath, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
 
 /**
  * JS/TS import patterns for tests.
@@ -867,6 +867,29 @@ describe('detectLanguageFamilies', () => {
   });
 });
 
+describe('findSampleImportLine', () => {
+  it('finds an import line from zig files', () => {
+    const zigDir = path.join(fixturesDir, 'zig-project');
+    const files = walkDir(zigDir, DEFAULT_SKIP_DIRS);
+    const result = findSampleImportLine(files, new Set(['.zig']));
+    assert.ok(result, 'Should find a sample line');
+    assert.ok(result.includes('@import'), 'Should contain @import');
+  });
+
+  it('finds an import line from JS/TS files', () => {
+    const files = walkDir(projectDir, DEFAULT_SKIP_DIRS);
+    const result = findSampleImportLine(files, new Set(['.ts']));
+    assert.ok(result, 'Should find a sample line');
+    assert.ok(result.includes('import') || result.includes('require'), 'Should contain import keyword');
+  });
+
+  it('returns null when no files match extensions', () => {
+    const files = walkDir(projectDir, DEFAULT_SKIP_DIRS);
+    const result = findSampleImportLine(files, new Set(['.xyz']));
+    assert.strictEqual(result, null, 'Should return null for no matching files');
+  });
+});
+
 describe('extensionsByTopDir', () => {
   it('groups extensions by top-level directory', () => {
     const allFiles = walkDir(monorepoDir, DEFAULT_SKIP_DIRS);
@@ -1050,6 +1073,32 @@ describe('no import patterns configured', () => {
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
     assert.ok(plain.includes('Directory Tree'), 'Should proceed with scan from config');
     assert.ok(!plain.includes('No import patterns configured'));
+  });
+
+  it('shows AI agent guidance for language without built-in hints', () => {
+    const zigDir = path.join(fixturesDir, 'zig-project');
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.zig', '--base-dir', zigDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No import patterns configured'), 'Should show no-import-patterns message');
+    assert.ok(plain.includes('zig'), 'Should detect zig family');
+    assert.ok(plain.includes('no built-in patterns available'), 'Should indicate no built-in patterns');
+    assert.ok(plain.includes('AI agent'), 'Should suggest using AI agent');
+  });
+
+  it('shows sample import line for language without built-in hints', () => {
+    const zigDir = path.join(fixturesDir, 'zig-project');
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.zig', '--base-dir', zigDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Sample from your code:'), 'Should show sample import line');
+    assert.ok(plain.includes('@import'), 'Sample should contain actual import syntax');
   });
 });
 

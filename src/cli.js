@@ -5,7 +5,7 @@ const path = require('path');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
   formatPaginatedInterview, detectSuspiciousDirs, filterScanResults,
-  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
+  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, findSampleImportLine,
   DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES, IMPORT_PATTERN_HINTS,
 } = require('./index');
 
@@ -646,7 +646,24 @@ function runInterview(flags) {
       console.log(`${yellow}No import patterns configured.${reset} Detected ${cyan}${hintFamily}${reset} files — try:`);
       console.log(`  archtest interview ${flagStr}`);
     } else {
-      console.log(`${yellow}No import patterns configured.${reset} Add ${cyan}--import-pattern '<regex>'${reset} or set ${cyan}scan.import-patterns${reset} in .archtest.yml.`);
+      // Identify the detected family (even if we don't have hint patterns for it)
+      const detectedFamily = detectedExts.length > 0
+        ? LANGUAGE_FAMILIES[detectedExts[0]]
+        : (families.size > 0 ? [...families][0] : null);
+
+      if (detectedFamily) {
+        console.log(`${yellow}No import patterns configured.${reset} Detected ${cyan}${detectedFamily}${reset} files but no built-in patterns available.`);
+      } else {
+        console.log(`${yellow}No import patterns configured.${reset} Add ${cyan}--import-pattern '<regex>'${reset} or set ${cyan}scan.import-patterns${reset} in .archtest.yml.`);
+      }
+
+      // Try to find a sample import line to give the user something concrete
+      const sampleLine = findSampleImportLine(allFiles, effectiveExtensions, effectiveSkipDirs);
+      if (sampleLine) {
+        console.log(`  Sample from your code: ${dim}${sampleLine}${reset}`);
+      }
+
+      console.log(`  Describe your import syntax to your AI agent and have it generate the ${cyan}--import-pattern${reset} regex.`);
       console.log(`  See ${cyan}archtest examples${reset} for Go, Python, Rust, and more.`);
     }
     console.log('');
