@@ -109,6 +109,22 @@ archtest interview --ext .rs --import-pattern 'use\s+([\w:]+)'
 
 Built-in hints exist for JS/TS, Go, Python, Rust, JVM, and Clojure — the tool suggests the right `--import-pattern` when it detects these languages. For everything else, your AI agent can figure out the pattern from a sample import line.
 
+## Monorepos
+
+Each sub-project can have its own `.archtest.yml` with different scan settings. Config lookup cascades upward from `--base-dir` to the repo root — nearest config wins.
+
+```
+my-monorepo/
+  backend/.archtest.yml     # extensions: [.clj], import-patterns for Clojure
+  mobile/.archtest.yml      # extensions: [.ts, .tsx], import-patterns for JS/TS
+  .archtest.yml             # shared rules (optional)
+```
+
+```bash
+archtest interview --base-dir backend/    # Uses backend/.archtest.yml
+archtest interview --base-dir mobile/     # Uses mobile/.archtest.yml
+```
+
 ## CI Integration
 
 archtest exits with code 1 on failure — add it to your test pipeline:
