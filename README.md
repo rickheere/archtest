@@ -1,6 +1,6 @@
 # archtest
 
-Architectural drift detection through declarative rules.
+Architectural drift detection through declarative rules. Any language with import statements.
 
 Define boundaries in YAML. Enforce them with grep. Let your AI write the rules.
 
@@ -26,10 +26,12 @@ Tell your AI coding agent:
 
 The agent will:
 
-1. Run `archtest interview` to analyze your imports and directory structure
-2. Ask you questions about which boundaries matter
-3. Write `.archtest.yml` rules based on your answers (using `archtest schema` and `archtest examples`)
-4. Run `archtest` to verify the rules pass (or catch existing violations)
+1. Run `archtest interview` — the tool reports it needs `--ext` and `--import-pattern` flags
+2. Figure out your language and provide the right flags (e.g. `--ext .go --import-pattern '^\s*"([^"]+)"'`)
+3. Run the interview again — this time it scans imports and maps your directory structure
+4. Ask you questions about which boundaries matter
+5. Write `.archtest.yml` rules based on your answers (using `archtest schema` and `archtest examples`)
+6. Run `archtest` to verify the rules pass (or catch existing violations)
 
 <p align="center">
   <img src="screenshot.png" alt="archtest interview output" width="700">
@@ -55,6 +57,9 @@ npx archtest --verbose   # Show all rules with per-file breakdown
 ```yaml
 scan:
   extensions: [.ts, .tsx]
+  import-patterns:
+    - 'require\s*\(\s*[''"]([^''"]+)[''"]\s*\)'
+    - '(?:import|export)\s+.*?\s+from\s+[''"]([^''"]+)[''"]'
   skip-dirs: [vendor]
 
 rules:
@@ -77,7 +82,32 @@ rules:
         - "prisma|knex|sequelize"
 ```
 
-The `scan` section persists interview settings so `archtest interview` works with no flags. CLI flags always override config.
+The `scan` section tells archtest which files to scan and how to extract imports. Both `extensions` and `import-patterns` are required. Save them in config so `archtest interview` works with no flags next time.
+
+## Any Language
+
+archtest works on any language with greppable import syntax. You provide `--ext` and `--import-pattern` (a regex where capture group 1 is the import target), and archtest does the rest.
+
+```bash
+# Go
+archtest interview --ext .go --import-pattern '^\s*"([^"]+)"'
+
+# Python
+archtest interview --ext .py \
+  --import-pattern 'from\s+(\S+)\s+import' \
+  --import-pattern 'import\s+(\S+)'
+
+# Kotlin / Java
+archtest interview --ext .kt --import-pattern 'import\s+([\w.]+)'
+
+# Clojure
+archtest interview --ext .clj --import-pattern '\[([a-z][a-z0-9.-]+\.[a-z][a-z0-9.-]+)'
+
+# Rust
+archtest interview --ext .rs --import-pattern 'use\s+([\w:]+)'
+```
+
+Built-in hints exist for JS/TS, Go, Python, Rust, JVM, and Clojure — the tool suggests the right `--import-pattern` when it detects these languages. For everything else, your AI agent can figure out the pattern from a sample import line.
 
 ## CI Integration
 
