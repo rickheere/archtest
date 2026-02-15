@@ -281,8 +281,8 @@ describe('scanCodebase', () => {
     // orchestrator.ts imports ./types and ./utils
     assert.ok(scan.fileDependencies.has('orchestrator.ts'));
     const deps = scan.fileDependencies.get('orchestrator.ts');
-    assert.ok(deps.internal.includes('utils.ts'));
-    assert.ok(deps.internal.length >= 1);
+    assert.ok(deps.all.includes('utils.ts'));
+    assert.ok(deps.all.length >= 1);
   });
 
   it('resolves imports to actual source files with extensions', () => {
@@ -291,7 +291,7 @@ describe('scanCodebase', () => {
     const indexDeps = scan.fileDependencies.get(path.join('strategies', 'workshop-v3', 'index.ts'));
     assert.ok(indexDeps, 'index.ts should have dependencies');
     assert.ok(
-      indexDeps.internal.some((d) => d.endsWith('strategy.ts')),
+      indexDeps.resolved.some((d) => d.endsWith('strategy.ts')),
       'Should resolve ./strategy to strategy.ts'
     );
   });
@@ -519,7 +519,6 @@ describe('scanCodebase without extensions', () => {
     assert.strictEqual(scan.directoryTree.size, 0);
     assert.strictEqual(scan.sourceFiles.length, 0);
     assert.strictEqual(scan.fileDependencies.size, 0);
-    assert.strictEqual(scan.externalDeps.size, 0);
   });
 });
 
@@ -728,5 +727,64 @@ describe('extension list filtering', () => {
     // Single-occurrence extensions should be filtered
     assert.ok(plain.includes('Extensions found:'));
     assert.ok(plain.includes('.ts'));
+  });
+});
+
+describe('flat dependency map (no internal/external distinction)', () => {
+  it('shows all imports without (external) labels', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatInterview(scan, projectDir);
+    assert.ok(!output.includes('(external)'), 'Should not contain (external) labels');
+  });
+
+  it('does not show Isolated Directories section', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatInterview(scan, projectDir);
+    assert.ok(!output.includes('Isolated Directories'), 'Should not contain Isolated Directories section');
+  });
+
+  it('shows all imports as flat list in dependency map', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatInterview(scan, projectDir);
+    // Should show resolved relative imports
+    assert.ok(output.includes('\u2192 utils.ts'));
+  });
+
+  it('fileDependencies stores all imports in .all and resolved in .resolved', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps, 'orchestrator.ts should have deps');
+    assert.ok(Array.isArray(deps.all), 'deps.all should be an array');
+    assert.ok(Array.isArray(deps.resolved), 'deps.resolved should be an array');
+    assert.ok(deps.all.includes('utils.ts'), 'all should include resolved relative imports');
+    assert.ok(deps.resolved.includes('utils.ts'), 'resolved should include resolved relative imports');
+  });
+
+  it('scanCodebase no longer returns externalDeps', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    assert.strictEqual(scan.externalDeps, undefined, 'externalDeps should not be in scan result');
+  });
+});
+
+describe('additive import patterns (CLI + config)', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('help text documents additive import pattern behavior', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Adds to patterns from .archtest.yml'));
+  });
+
+  it('schema documents that CLI --import-pattern adds to config', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'schema'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('adds to'));
+    assert.ok(output.includes('import-pattern'));
   });
 });

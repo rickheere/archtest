@@ -43,14 +43,15 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
                            ${dim}Can also be set in .archtest.yml scan.extensions${reset}
   --skip-ext <exts>        Comma-separated extensions to exclude from scan
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
-                           ${dim}Can be repeated. Default: JS require/import patterns.${reset}
-                           ${dim}Can also be set in .archtest.yml scan.import-patterns${reset}
+                           ${dim}Can be repeated. Adds to patterns from .archtest.yml.${reset}
+                           ${dim}Default: JS require/import patterns (when no config).${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
                            ${dim}Can also be set in .archtest.yml scan.skip-dirs${reset}
   --full                   Disable auto-exclusion of large directories
 
 ${bold}Scan Config:${reset} ${dim}Persist scan settings in .archtest.yml so they apply automatically.${reset}
-  CLI flags always override config. See ${cyan}archtest schema${reset} for the format.
+  CLI --ext overrides config. CLI --import-pattern adds to config patterns.
+  See ${cyan}archtest schema${reset} for the format.
 
 ${bold}Import Pattern Examples:${reset} ${dim}(for non-JS/TS projects)${reset}
   ${cyan}Go:${reset}     --import-pattern '^\\s*"([^"]+)"'
@@ -136,8 +137,9 @@ ${dim}${'─'.repeat(50)}${reset}
 
 ${bold}Precedence${reset}
 ${dim}${'─'.repeat(50)}${reset}
-  CLI flags ${dim}(highest)${reset} > .archtest.yml scan config > defaults
-  CLI --ext .py overrides scan.extensions in config.
+  CLI --ext overrides scan.extensions in config.
+  CLI --import-pattern ${dim}adds to${reset} scan.import-patterns in config.
+  CLI --skip ${dim}adds to${reset} defaults (always additive).
   When no flags and no config, extension guidance is shown.
 
 ${bold}Base Directory${reset}
@@ -254,7 +256,7 @@ Once you find the right flags, save them so future runs just work:
   ${cyan}Clojure:${reset}
     scan:
       extensions: [.clj, .cljs, .cljc]
-      import-patterns: [':require\\s+\\[([^\\s\\]]+)']
+      import-patterns: ['\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)']
       skip-dirs: [target, .cpcache]
 
 ${bold}Multi-Language Interview${reset} ${dim}(CLI flags — same settings, one-off)${reset}
@@ -375,7 +377,7 @@ function parseFlags(args) {
     skipFromCli: skipDirs !== null,
     extensions,
     skipExtensions,
-    importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
+    importPatterns,
     importPatternsFromCli: importPatterns.length > 0,
     baseDir,
     full,
@@ -418,11 +420,17 @@ function runInterview(flags) {
     );
   }
 
-  // Determine effective import patterns: CLI > config > defaults
-  const importPatternsFromCli = flags.importPatternsFromCli;
-  let effectiveImportPatterns = flags.importPatterns;
-  if (!importPatternsFromCli && scanConfig && scanConfig.importPatterns) {
-    effectiveImportPatterns = scanConfig.importPatterns;
+  // Determine effective import patterns: CLI + config (additive), or config, or defaults
+  const configPatterns = scanConfig && scanConfig.importPatterns ? scanConfig.importPatterns : [];
+  let effectiveImportPatterns;
+  if (flags.importPatternsFromCli && configPatterns.length > 0) {
+    effectiveImportPatterns = [...flags.importPatterns, ...configPatterns];
+  } else if (flags.importPatternsFromCli) {
+    effectiveImportPatterns = flags.importPatterns;
+  } else if (configPatterns.length > 0) {
+    effectiveImportPatterns = configPatterns;
+  } else {
+    effectiveImportPatterns = DEFAULT_IMPORT_PATTERNS;
   }
 
   // Determine effective skip dirs: CLI > config scan.skip-dirs > config top-level skip > defaults

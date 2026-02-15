@@ -321,7 +321,7 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
 
 /**
  * Scan the codebase and build a complete file-level dependency map.
- * Returns { directoryTree, sourceFiles, fileDependencies, externalDeps }
+ * Returns { directoryTree, sourceFiles, fileDependencies }
  *
  * @param {string} baseDir - Root directory to scan
  * @param {Object} [options]
@@ -339,7 +339,6 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
       directoryTree: new Map(),
       sourceFiles: [],
       fileDependencies: new Map(),
-      externalDeps: new Map(),
     };
   }
 
@@ -362,41 +361,33 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
 
   // Build file-level dependency map
   const fileDependencies = new Map();
-  const externalDeps = new Map();
 
   for (const file of sourceFiles) {
     const rel = path.relative(baseDir, file);
     const imports = extractImports(file, importPatterns);
-    const internal = [];
-    const external = [];
+    const all = [];
+    const resolved = []; // resolved relative imports for cross-directory analysis
 
     for (const imp of imports) {
       if (imp.startsWith('.')) {
-        const resolved = resolveImportPath(imp, file, baseDir, ext, sourceFileSet);
-        if (resolved && !internal.includes(resolved)) {
-          internal.push(resolved);
+        const resolvedPath = resolveImportPath(imp, file, baseDir, ext, sourceFileSet);
+        if (resolvedPath && !all.includes(resolvedPath)) {
+          all.push(resolvedPath);
+          resolved.push(resolvedPath);
         }
       } else {
-        const pkgName = imp.startsWith('@')
-          ? imp.split('/').slice(0, 2).join('/')
-          : imp.split('/')[0];
-        if (!external.includes(pkgName)) {
-          external.push(pkgName);
+        if (!all.includes(imp)) {
+          all.push(imp);
         }
-        // Track per top-level directory for interview guide
-        const parts = rel.split(path.sep);
-        const sourceDir = parts.length > 1 ? parts[0] : '.';
-        if (!externalDeps.has(pkgName)) externalDeps.set(pkgName, new Set());
-        externalDeps.get(pkgName).add(sourceDir);
       }
     }
 
-    if (internal.length > 0 || external.length > 0) {
-      fileDependencies.set(rel, { internal, external });
+    if (all.length > 0) {
+      fileDependencies.set(rel, { all, resolved });
     }
   }
 
-  return { directoryTree, sourceFiles, fileDependencies, externalDeps };
+  return { directoryTree, sourceFiles, fileDependencies };
 }
 
 /**
@@ -454,18 +445,7 @@ function filterScanResults(scan, excludeDirs, baseDir) {
     fileDependencies.set(filePath, deps);
   }
 
-  // Rebuild external deps from remaining files
-  const externalDeps = new Map();
-  for (const [filePath, deps] of fileDependencies) {
-    for (const pkg of deps.external) {
-      const parts = filePath.split(path.sep);
-      const sourceDir = parts.length > 1 ? parts[0] : '.';
-      if (!externalDeps.has(pkg)) externalDeps.set(pkg, new Set());
-      externalDeps.get(pkg).add(sourceDir);
-    }
-  }
-
-  return { directoryTree, sourceFiles, fileDependencies, externalDeps };
+  return { directoryTree, sourceFiles, fileDependencies };
 }
 
 /**
@@ -483,7 +463,6 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
   const bold = '\x1b[1m';
   const cyan = '\x1b[36m';
   const yellow = '\x1b[33m';
-  const green = '\x1b[32m';
   const red = '\x1b[31m';
   const reset = '\x1b[0m';
 
@@ -569,11 +548,8 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
     const files = filesByDir.get(dir).sort((a, b) => a[0].localeCompare(b[0]));
     for (const [filePath, deps] of files) {
       lines.push(`  ${bold}${filePath}${reset}`);
-      for (const imp of deps.internal) {
+      for (const imp of deps.all) {
         lines.push(`    \u2192 ${imp}`);
-      }
-      for (const imp of deps.external) {
-        lines.push(`    \u2192 ${dim}${imp} (external)${reset}`);
       }
       lines.push('');
     }
@@ -584,12 +560,12 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
     lines.push('');
   }
 
-  // Compute directory-level cross-dependencies from file-level data
+  // Compute directory-level cross-dependencies from resolved relative imports
   const dirDependencies = new Map();
   for (const [filePath, deps] of scan.fileDependencies) {
     const parts = filePath.split(path.sep);
     const sourceDir = parts.length > 1 ? parts[0] : '.';
-    for (const imp of deps.internal) {
+    for (const imp of deps.resolved) {
       const targetParts = imp.split(path.sep);
       const targetDir = targetParts.length > 1 ? targetParts[0] : '.';
       if (targetDir !== sourceDir) {
@@ -618,27 +594,6 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
       const labelA = a === '.' ? '(root)' : `${a}/`;
       const labelB = b === '.' ? '(root)' : `${b}/`;
       lines.push(`  ${red}\u2194${reset}  ${cyan}${labelA}${reset} ${dim}\u2194${reset} ${cyan}${labelB}${reset}`);
-    }
-    lines.push('');
-  }
-
-  // Islands (top-level directories with no cross-directory dependencies)
-  const topLevelDirs = [...scan.directoryTree.keys()]
-    .filter((d) => d !== '.' && !d.includes(path.sep));
-  const islands = topLevelDirs.filter((d) => {
-    const hasOutgoing = dirDependencies.has(d) && dirDependencies.get(d).size > 0;
-    let hasIncoming = false;
-    for (const [, targets] of dirDependencies) {
-      if (targets.has(d)) { hasIncoming = true; break; }
-    }
-    return !hasOutgoing && !hasIncoming;
-  });
-
-  if (islands.length > 0) {
-    lines.push(`${bold}${green}Isolated Directories${reset} ${dim}(no cross-directory imports)${reset}`);
-    lines.push('');
-    for (const d of islands) {
-      lines.push(`  ${green}\u2713${reset}  ${dim}${d}/${reset}`);
     }
     lines.push('');
   }
