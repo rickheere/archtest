@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
+  detectSuspiciousDirs, filterScanResults,
   DEFAULT_EXTENSIONS, DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 } = require('./index');
 
@@ -42,6 +43,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Default: JS require/import patterns.${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
+  --full                   Disable auto-exclusion of large directories
 
 ${yellow}AI-first architectural testing.${reset} Define boundaries in YAML, enforce
 them with grep-based pattern matching. Rules are designed to be
@@ -250,6 +252,7 @@ function parseFlags(args) {
   let skipDirs = null;
   let extensions = null;
   let baseDir = null;
+  let full = false;
   const importPatterns = [];
   const remaining = [];
 
@@ -266,6 +269,8 @@ function parseFlags(args) {
     } else if (args[i] === '--base-dir' && args[i + 1]) {
       baseDir = path.resolve(args[i + 1]);
       i++;
+    } else if (args[i] === '--full') {
+      full = true;
     } else {
       remaining.push(args[i]);
     }
@@ -277,18 +282,29 @@ function parseFlags(args) {
     extensions: extensions || DEFAULT_EXTENSIONS,
     importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
     baseDir,
+    full,
     remaining,
   };
 }
 
 function runInterview(flags) {
   const baseDir = flags.baseDir || process.cwd();
-  const scan = scanCodebase(baseDir, {
+  let scan = scanCodebase(baseDir, {
     extensions: flags.extensions,
     importPatterns: flags.importPatterns,
     skipDirs: flags.skipDirs,
   });
-  const output = formatInterview(scan, baseDir);
+
+  let excludedDirs = [];
+  if (!flags.full) {
+    const suspicious = detectSuspiciousDirs(scan.directoryTree);
+    if (suspicious.length > 0) {
+      excludedDirs = suspicious;
+      scan = filterScanResults(scan, suspicious.map((s) => s.dir), baseDir);
+    }
+  }
+
+  const output = formatInterview(scan, baseDir, { excludedDirs });
   console.log(output);
 }
 

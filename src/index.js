@@ -362,11 +362,85 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
 }
 
 /**
+ * Detect directories with suspiciously high file counts (likely build output or vendored code).
+ * Returns an array of { dir, count } for directories with >= threshold source files.
+ *
+ * @param {Map<string, string[]>} directoryTree - Map of dir → array of filenames
+ * @param {number} [threshold=50] - Minimum file count to flag a directory
+ * @returns {{ dir: string, count: number }[]}
+ */
+function detectSuspiciousDirs(directoryTree, threshold = 50) {
+  const suspicious = [];
+  for (const [dir, files] of directoryTree) {
+    if (dir === '.') continue;
+    if (files.length >= threshold) {
+      suspicious.push({ dir, count: files.length });
+    }
+  }
+  return suspicious.sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Filter scan results to exclude files under the given directories.
+ * Returns a new scan object with excluded dirs removed from directoryTree,
+ * sourceFiles, fileDependencies, and externalDeps.
+ *
+ * @param {Object} scan - The scan result from scanCodebase
+ * @param {string[]} excludeDirs - Array of relative directory paths to exclude
+ * @param {string} baseDir - The base directory used for scanning
+ * @returns {Object} Filtered scan result
+ */
+function filterScanResults(scan, excludeDirs, baseDir) {
+  if (excludeDirs.length === 0) return scan;
+
+  const isExcluded = (relPath) =>
+    excludeDirs.some((d) => relPath === d || relPath.startsWith(d + path.sep));
+
+  // Filter directory tree
+  const directoryTree = new Map();
+  for (const [dir, files] of scan.directoryTree) {
+    if (dir !== '.' && isExcluded(dir)) continue;
+    directoryTree.set(dir, files);
+  }
+
+  // Filter source files
+  const sourceFiles = scan.sourceFiles.filter((f) => {
+    const rel = path.relative(baseDir, f);
+    return !isExcluded(rel);
+  });
+
+  // Filter file dependencies
+  const fileDependencies = new Map();
+  for (const [filePath, deps] of scan.fileDependencies) {
+    if (isExcluded(filePath)) continue;
+    fileDependencies.set(filePath, deps);
+  }
+
+  // Rebuild external deps from remaining files
+  const externalDeps = new Map();
+  for (const [filePath, deps] of fileDependencies) {
+    for (const pkg of deps.external) {
+      const parts = filePath.split(path.sep);
+      const sourceDir = parts.length > 1 ? parts[0] : '.';
+      if (!externalDeps.has(pkg)) externalDeps.set(pkg, new Set());
+      externalDeps.get(pkg).add(sourceDir);
+    }
+  }
+
+  return { directoryTree, sourceFiles, fileDependencies, externalDeps };
+}
+
+/**
  * Format the codebase scan as a structured interview report.
  * Shows a complete directory tree and file-level dependency map
  * so architectural patterns and violations are immediately visible.
+ *
+ * @param {Object} scan - The scan result from scanCodebase
+ * @param {string} baseDir - The base directory used for scanning
+ * @param {Object} [options]
+ * @param {{ dir: string, count: number }[]} [options.excludedDirs] - Auto-excluded directories with file counts
  */
-function formatInterview(scan, baseDir) {
+function formatInterview(scan, baseDir, { excludedDirs } = {}) {
   const dim = '\x1b[2m';
   const bold = '\x1b[1m';
   const cyan = '\x1b[36m';
@@ -382,6 +456,15 @@ function formatInterview(scan, baseDir) {
   lines.push(`${bold}archtest interview${reset} ${dim}\u2014 Codebase Analysis${reset}`);
   lines.push(`${dim}${'─'.repeat(50)}${reset}`);
   lines.push('');
+
+  // Auto-exclusion warnings
+  if (excludedDirs && excludedDirs.length > 0) {
+    for (const { dir, count } of excludedDirs) {
+      lines.push(`${yellow}Excluded: ${dir}/ (${count} files) \u2014 unusually large, likely build output${reset}`);
+    }
+    lines.push(`${dim}Add to skip list or use --full to include.${reset}`);
+    lines.push('');
+  }
 
   // Directory Tree
   lines.push(`${bold}Directory Tree${reset}`);
@@ -547,6 +630,6 @@ function formatInterview(scan, baseDir) {
 
 module.exports = {
   parseRuleFile, resolveGlobs, checkFile, runRules, formatResults,
-  scanCodebase, formatInterview,
+  scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults,
   DEFAULT_EXTENSIONS, DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 };

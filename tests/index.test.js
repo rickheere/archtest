@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, DEFAULT_SKIP_DIRS } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, DEFAULT_SKIP_DIRS } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -380,5 +380,111 @@ describe('CLI --skip is additive', () => {
     );
     // Should pass — the rule looks for console.log in utils.ts which has none
     assert.ok(output.includes('\u2713'));
+  });
+});
+
+const largeProjectDir = path.join(fixturesDir, 'large-project');
+
+describe('detectSuspiciousDirs', () => {
+  it('flags directories with >= 50 files', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const suspicious = detectSuspiciousDirs(scan.directoryTree);
+    assert.strictEqual(suspicious.length, 1);
+    assert.strictEqual(suspicious[0].dir, 'vendor');
+    assert.strictEqual(suspicious[0].count, 60);
+  });
+
+  it('does not flag directories below threshold', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const suspicious = detectSuspiciousDirs(scan.directoryTree);
+    assert.ok(!suspicious.some((s) => s.dir === 'src'));
+  });
+
+  it('supports custom threshold', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const suspicious = detectSuspiciousDirs(scan.directoryTree, 5);
+    assert.ok(suspicious.some((s) => s.dir === 'src'));
+    assert.ok(suspicious.some((s) => s.dir === 'vendor'));
+  });
+
+  it('ignores root directory', () => {
+    const tree = new Map([
+      ['.', Array.from({ length: 100 }, (_, i) => `file${i}.js`)],
+    ]);
+    const suspicious = detectSuspiciousDirs(tree);
+    assert.strictEqual(suspicious.length, 0);
+  });
+});
+
+describe('filterScanResults', () => {
+  it('removes excluded directories from directoryTree', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
+    assert.ok(!filtered.directoryTree.has('vendor'));
+    assert.ok(filtered.directoryTree.has('src'));
+  });
+
+  it('removes excluded files from sourceFiles', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
+    assert.strictEqual(filtered.sourceFiles.length, 10);
+    for (const f of filtered.sourceFiles) {
+      assert.ok(!f.includes('vendor'));
+    }
+  });
+
+  it('returns original scan when excludeDirs is empty', () => {
+    const scan = scanCodebase(largeProjectDir);
+    const filtered = filterScanResults(scan, [], largeProjectDir);
+    assert.strictEqual(filtered, scan);
+  });
+});
+
+describe('auto-exclusion in interview CLI', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('auto-excludes vendor/ with warning', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Excluded: vendor/'));
+    assert.ok(output.includes('60 files'));
+    assert.ok(output.includes('--full'));
+  });
+
+  it('--full disables auto-exclusion', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--full', '--base-dir', largeProjectDir],
+      { encoding: 'utf8' }
+    );
+    assert.ok(!output.includes('Excluded:'));
+    assert.ok(output.includes('vendor/'));
+    assert.ok(output.includes('70 source files total'));
+  });
+
+  it('auto-excluded dir does not appear in directory tree', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
+      { encoding: 'utf8' }
+    );
+    // Strip ANSI codes for checking
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // The Directory Tree section should not list vendor/ as a directory entry
+    const treeSection = plain.split('Directory Tree')[1].split('Dependency Map')[0];
+    // vendor/ should only appear in the Excluded: warning, not in the tree
+    assert.ok(!treeSection.includes('vendor/'));
+  });
+
+  it('source file count reflects only included files', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('10 source files total'));
   });
 });
