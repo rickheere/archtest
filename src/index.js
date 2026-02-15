@@ -276,16 +276,6 @@ function countExtensions(allFiles) {
 }
 
 /**
- * Default import extraction patterns (JavaScript/TypeScript).
- * Each regex must have capture group 1 = the import target.
- */
-const DEFAULT_IMPORT_PATTERNS = [
-  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,           // require('...')
-  /(?:import|export)\s+.*?\s+from\s+['"]([^'"]+)['"]/g, // import/export ... from '...'
-  /^import\s+['"]([^'"]+)['"]/gm,                     // import '...' (side-effect)
-];
-
-/**
  * Extract import targets from a source file using configurable patterns.
  * Each pattern must have capture group 1 = the import path.
  * Returns array of raw import strings.
@@ -293,7 +283,7 @@ const DEFAULT_IMPORT_PATTERNS = [
 function extractImports(filePath, importPatterns) {
   const content = fs.readFileSync(filePath, 'utf8');
   const imports = [];
-  const patterns = importPatterns || DEFAULT_IMPORT_PATTERNS;
+  const patterns = importPatterns || [];
 
   for (const pattern of patterns) {
     // Clone regex to reset lastIndex for each file
@@ -382,7 +372,7 @@ function resolveAliasImport(importStr, aliases, baseDir, extensions, sourceFileS
  * @param {string} baseDir - Root directory to scan
  * @param {Object} [options]
  * @param {Set<string>} [options.extensions] - File extensions to scan (required for results)
- * @param {RegExp[]} [options.importPatterns] - Regexes to extract imports, group 1 = target (default: JS/TS)
+ * @param {RegExp[]} [options.importPatterns] - Regexes to extract imports, group 1 = target (no default — pass explicitly)
  * @param {Set<string>} [options.skipDirs] - Directory names to skip (default: node_modules, .git)
  * @param {Object|null} [options.aliases] - Path alias map { prefix: targetDir }. null disables aliases. Default: DEFAULT_ALIASES.
  */
@@ -937,6 +927,19 @@ const LANGUAGE_FAMILIES = {
 };
 
 /**
+ * Suggested --import-pattern flags per language family.
+ * Used to guide users when no import patterns are configured.
+ */
+const IMPORT_PATTERN_HINTS = {
+  js:      ["'require\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)'", "'(?:import|export)\\s+.*?\\s+from\\s+['\"]([^'\"]+)['\"]'"],
+  go:      ["'^\\s*\"([^\"]+)\"'"],
+  python:  ["'from\\s+(\\S+)\\s+import'", "'import\\s+(\\S+)'"],
+  rust:    ["'use\\s+([\\w:]+)'"],
+  jvm:     ["'import\\s+([\\w.]+)'"],
+  clojure: ["'\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)\\]'"],
+};
+
+/**
  * Detect distinct language families from an extension count map.
  * Returns a Set of family names found.
  */
@@ -1003,5 +1006,5 @@ module.exports = {
   detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
   resolveAliasImport, resolveImportPath,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES,
+  DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES, IMPORT_PATTERN_HINTS,
 };

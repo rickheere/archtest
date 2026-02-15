@@ -1,5 +1,8 @@
 scan:
   extensions: [.js, .ts]
+  import-patterns:
+    - 'require\s*\(\s*[''"]([^''"]+)[''"]'
+    - '(?:import|export)\s+.*?\s+from\s+[''"]([^''"]+)[''"]'
 
 rules:
   - name: no-console
