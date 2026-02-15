@@ -261,8 +261,40 @@ function extractImports(filePath, importPatterns) {
 }
 
 /**
- * Scan the codebase and build a dependency map.
- * Returns { directories, sourceFiles, dependencies, externalDeps }
+ * Resolve a relative import to a source file path relative to baseDir.
+ * Tries the exact path, then with each extension, then as a directory index.
+ * Returns the relative path from baseDir, or null if it resolves outside baseDir.
+ */
+function resolveImportPath(importStr, importingFile, baseDir, extensions, sourceFileSet) {
+  const dir = path.dirname(importingFile);
+  const resolved = path.resolve(dir, importStr);
+  const rel = path.relative(baseDir, resolved);
+
+  // Skip if it resolves outside baseDir
+  if (rel.startsWith('..')) return null;
+
+  // Try exact match
+  if (sourceFileSet.has(rel)) return rel;
+
+  // Try with each extension
+  for (const ext of extensions) {
+    const withExt = rel + ext;
+    if (sourceFileSet.has(withExt)) return withExt;
+  }
+
+  // Try as directory index
+  for (const ext of extensions) {
+    const indexFile = path.join(rel, `index${ext}`);
+    if (sourceFileSet.has(indexFile)) return indexFile;
+  }
+
+  // Can't resolve to a known source file — return raw relative path
+  return rel;
+}
+
+/**
+ * Scan the codebase and build a complete file-level dependency map.
+ * Returns { directoryTree, sourceFiles, fileDependencies, externalDeps }
  *
  * @param {string} baseDir - Root directory to scan
  * @param {Object} [options]
@@ -275,63 +307,64 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
   const allFiles = walkDir(baseDir, skipDirs);
   const sourceFiles = allFiles.filter((f) => ext.has(path.extname(f)));
 
-  // Group files by top-level directory
-  const directories = new Map();
+  // Build full directory tree: relDirPath → array of filenames (basenames)
+  const directoryTree = new Map();
   for (const file of sourceFiles) {
     const rel = path.relative(baseDir, file);
-    const parts = rel.split(path.sep);
-    const topDir = parts.length > 1 ? parts[0] : '.';
-    if (!directories.has(topDir)) {
-      directories.set(topDir, { files: [], fileCount: 0 });
+    const dir = path.dirname(rel);
+    const dirKey = dir === '.' ? '.' : dir;
+    if (!directoryTree.has(dirKey)) {
+      directoryTree.set(dirKey, []);
     }
-    directories.get(topDir).files.push(rel);
-    directories.get(topDir).fileCount++;
+    directoryTree.get(dirKey).push(path.basename(rel));
   }
 
-  // Build dependency map
-  const dependencies = new Map(); // sourceDir -> Map<targetDir, {count, examples}>
-  const externalDeps = new Map(); // packageName -> Set<dirs that use it>
+  // Build set of all source file relative paths for import resolution
+  const sourceFileSet = new Set(sourceFiles.map((f) => path.relative(baseDir, f)));
+
+  // Build file-level dependency map
+  const fileDependencies = new Map();
+  const externalDeps = new Map();
 
   for (const file of sourceFiles) {
     const rel = path.relative(baseDir, file);
-    const parts = rel.split(path.sep);
-    const sourceDir = parts.length > 1 ? parts[0] : '.';
     const imports = extractImports(file, importPatterns);
+    const internal = [];
+    const external = [];
 
     for (const imp of imports) {
       if (imp.startsWith('.')) {
-        // Relative import — resolve target directory
-        const resolved = path.resolve(path.dirname(file), imp);
-        const resolvedRel = path.relative(baseDir, resolved);
-        const targetParts = resolvedRel.split(path.sep);
-        const targetDir = targetParts.length > 1 ? targetParts[0] : '.';
-
-        if (targetDir !== sourceDir) {
-          if (!dependencies.has(sourceDir)) dependencies.set(sourceDir, new Map());
-          const dirDeps = dependencies.get(sourceDir);
-          if (!dirDeps.has(targetDir)) dirDeps.set(targetDir, { count: 0, examples: [] });
-          const dep = dirDeps.get(targetDir);
-          dep.count++;
-          if (dep.examples.length < 3) {
-            dep.examples.push({ from: rel, imports: imp });
-          }
+        const resolved = resolveImportPath(imp, file, baseDir, ext, sourceFileSet);
+        if (resolved && !internal.includes(resolved)) {
+          internal.push(resolved);
         }
       } else {
-        // External/package import
-        const pkgName = imp.startsWith('@') ? imp.split('/').slice(0, 2).join('/') : imp.split('/')[0];
+        const pkgName = imp.startsWith('@')
+          ? imp.split('/').slice(0, 2).join('/')
+          : imp.split('/')[0];
+        if (!external.includes(pkgName)) {
+          external.push(pkgName);
+        }
+        // Track per top-level directory for interview guide
+        const parts = rel.split(path.sep);
+        const sourceDir = parts.length > 1 ? parts[0] : '.';
         if (!externalDeps.has(pkgName)) externalDeps.set(pkgName, new Set());
         externalDeps.get(pkgName).add(sourceDir);
       }
     }
+
+    if (internal.length > 0 || external.length > 0) {
+      fileDependencies.set(rel, { internal, external });
+    }
   }
 
-  return { directories, sourceFiles, dependencies, externalDeps };
+  return { directoryTree, sourceFiles, fileDependencies, externalDeps };
 }
 
 /**
  * Format the codebase scan as a structured interview report.
- * Output is designed for an AI agent to read and use as context
- * for interviewing the developer about architectural boundaries.
+ * Shows a complete directory tree and file-level dependency map
+ * so architectural patterns and violations are immediately visible.
  */
 function formatInterview(scan, baseDir) {
   const dim = '\x1b[2m';
@@ -350,55 +383,106 @@ function formatInterview(scan, baseDir) {
   lines.push(`${dim}${'─'.repeat(50)}${reset}`);
   lines.push('');
 
-  // Directory overview
-  lines.push(`${bold}Directory Structure${reset}`);
+  // Directory Tree
+  lines.push(`${bold}Directory Tree${reset}`);
   lines.push('');
-  const sortedDirs = [...scan.directories.entries()].sort((a, b) => b[1].fileCount - a[1].fileCount);
-  for (const [dir, info] of sortedDirs) {
-    const label = dir === '.' ? '(root)' : `${dir}/`;
-    lines.push(`  ${cyan}${label.padEnd(30)}${reset} ${dim}${info.fileCount} file${info.fileCount === 1 ? '' : 's'}${reset}`);
+
+  // Collect all directory paths including intermediate parents
+  const allDirPaths = new Set();
+  for (const dir of scan.directoryTree.keys()) {
+    if (dir === '.') continue;
+    const parts = dir.split(path.sep);
+    for (let i = 1; i <= parts.length; i++) {
+      allDirPaths.add(parts.slice(0, i).join(path.sep));
+    }
   }
+  const sortedDirPaths = [...allDirPaths].sort();
+
+  // Show root files
+  if (scan.directoryTree.has('.')) {
+    const count = scan.directoryTree.get('.').length;
+    lines.push(`  ${dim}(root)${reset}${' '.repeat(22)}${dim}${count} file${count === 1 ? '' : 's'}${reset}`);
+  }
+
+  // Show directory tree with indentation
+  for (const dir of sortedDirPaths) {
+    const depth = dir.split(path.sep).length;
+    const indent = '  ' + '  '.repeat(depth);
+    const dirName = path.basename(dir) + '/';
+    const fileCount = scan.directoryTree.has(dir) ? scan.directoryTree.get(dir).length : 0;
+    if (fileCount > 0) {
+      const padding = Math.max(1, 28 - indent.length - dirName.length);
+      lines.push(`${indent}${cyan}${dirName}${reset}${' '.repeat(padding)}${dim}${fileCount} file${fileCount === 1 ? '' : 's'}${reset}`);
+    } else {
+      lines.push(`${indent}${cyan}${dirName}${reset}`);
+    }
+  }
+
   lines.push('');
   lines.push(`  ${dim}${scan.sourceFiles.length} source files total${reset}`);
   lines.push('');
 
-  // Dependency map
-  lines.push(`${bold}Cross-Directory Dependencies${reset}`);
-  lines.push(`${dim}Which directories import from which other directories.${reset}`);
+  // Dependency Map — file-level
+  lines.push(`${bold}Dependency Map${reset}`);
+  lines.push(`${dim}File-level imports across the codebase.${reset}`);
   lines.push('');
 
-  const allDirs = [...scan.directories.keys()].sort();
+  // Group files with dependencies by their directory
+  const filesByDir = new Map();
+  for (const [filePath, deps] of scan.fileDependencies) {
+    const dir = path.dirname(filePath);
+    const dirKey = dir === '.' ? '.' : dir;
+    if (!filesByDir.has(dirKey)) filesByDir.set(dirKey, []);
+    filesByDir.get(dirKey).push([filePath, deps]);
+  }
+
+  const sortedDepDirs = [...filesByDir.keys()].sort((a, b) => {
+    if (a === '.') return -1;
+    if (b === '.') return 1;
+    return a.localeCompare(b);
+  });
+
   let hasDeps = false;
-
-  for (const sourceDir of allDirs) {
-    const dirDeps = scan.dependencies.get(sourceDir);
-    if (!dirDeps || dirDeps.size === 0) continue;
+  for (const dir of sortedDepDirs) {
     hasDeps = true;
-
-    const label = sourceDir === '.' ? '(root)' : `${sourceDir}/`;
-    lines.push(`  ${bold}${label}${reset} imports from:`);
-
-    const sortedDeps = [...dirDeps.entries()].sort((a, b) => b[1].count - a[1].count);
-    for (const [targetDir, dep] of sortedDeps) {
-      const targetLabel = targetDir === '.' ? '(root)' : `${targetDir}/`;
-      lines.push(`    \u2192 ${cyan}${targetLabel}${reset}  ${dim}(${dep.count} import${dep.count === 1 ? '' : 's'})${reset}`);
-      for (const ex of dep.examples) {
-        lines.push(`      ${dim}${ex.from}${reset}`);
+    const files = filesByDir.get(dir).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [filePath, deps] of files) {
+      lines.push(`  ${bold}${filePath}${reset}`);
+      for (const imp of deps.internal) {
+        lines.push(`    \u2192 ${imp}`);
       }
+      for (const imp of deps.external) {
+        lines.push(`    \u2192 ${dim}${imp} (external)${reset}`);
+      }
+      lines.push('');
     }
-    lines.push('');
   }
 
   if (!hasDeps) {
-    lines.push(`  ${dim}No cross-directory dependencies found.${reset}`);
+    lines.push(`  ${dim}No dependencies found.${reset}`);
     lines.push('');
+  }
+
+  // Compute directory-level cross-dependencies from file-level data
+  const dirDependencies = new Map();
+  for (const [filePath, deps] of scan.fileDependencies) {
+    const parts = filePath.split(path.sep);
+    const sourceDir = parts.length > 1 ? parts[0] : '.';
+    for (const imp of deps.internal) {
+      const targetParts = imp.split(path.sep);
+      const targetDir = targetParts.length > 1 ? targetParts[0] : '.';
+      if (targetDir !== sourceDir) {
+        if (!dirDependencies.has(sourceDir)) dirDependencies.set(sourceDir, new Set());
+        dirDependencies.get(sourceDir).add(targetDir);
+      }
+    }
   }
 
   // Identify mutual dependencies (bidirectional coupling)
   const mutual = [];
-  for (const [sourceDir, dirDeps] of scan.dependencies) {
-    for (const [targetDir] of dirDeps) {
-      const reverse = scan.dependencies.get(targetDir);
+  for (const [sourceDir, targets] of dirDependencies) {
+    for (const targetDir of targets) {
+      const reverse = dirDependencies.get(targetDir);
       if (reverse && reverse.has(sourceDir) && sourceDir < targetDir) {
         mutual.push([sourceDir, targetDir]);
       }
@@ -417,15 +501,16 @@ function formatInterview(scan, baseDir) {
     lines.push('');
   }
 
-  // Islands (directories with no cross-directory dependencies)
-  const islands = allDirs.filter((d) => {
-    const outgoing = scan.dependencies.get(d);
-    const hasOutgoing = outgoing && outgoing.size > 0;
+  // Islands (top-level directories with no cross-directory dependencies)
+  const topLevelDirs = [...scan.directoryTree.keys()]
+    .filter((d) => d !== '.' && !d.includes(path.sep));
+  const islands = topLevelDirs.filter((d) => {
+    const hasOutgoing = dirDependencies.has(d) && dirDependencies.get(d).size > 0;
     let hasIncoming = false;
-    for (const [, dirDeps] of scan.dependencies) {
-      if (dirDeps.has(d)) { hasIncoming = true; break; }
+    for (const [, targets] of dirDependencies) {
+      if (targets.has(d)) { hasIncoming = true; break; }
     }
-    return !hasOutgoing && !hasIncoming && d !== '.';
+    return !hasOutgoing && !hasIncoming;
   });
 
   if (islands.length > 0) {

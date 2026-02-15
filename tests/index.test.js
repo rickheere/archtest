@@ -239,50 +239,99 @@ describe('DEFAULT_SKIP_DIRS', () => {
 });
 
 describe('scanCodebase', () => {
-  it('groups files by top-level directory relative to baseDir', () => {
+  it('builds full directory tree with nested paths', () => {
     const scan = scanCodebase(projectDir);
-    const dirNames = [...scan.directories.keys()].sort();
-    assert.ok(dirNames.includes('strategies'));
-    assert.ok(dirNames.includes('.'));  // root-level files
+    const dirNames = [...scan.directoryTree.keys()].sort();
+    // Should have root files and nested strategy directory
+    assert.ok(dirNames.includes('.'));
+    assert.ok(dirNames.some((d) => d.includes('workshop-v3')));
   });
 
-  it('uses subdirectory as baseDir to regroup directories', () => {
+  it('directoryTree contains filenames per directory', () => {
+    const scan = scanCodebase(projectDir);
+    // Root should contain orchestrator.ts and utils.ts
+    const rootFiles = scan.directoryTree.get('.');
+    assert.ok(rootFiles.includes('orchestrator.ts'));
+    assert.ok(rootFiles.includes('utils.ts'));
+  });
+
+  it('uses subdirectory as baseDir to scope the tree', () => {
     const subDir = path.join(projectDir, 'strategies');
     const scan = scanCodebase(subDir);
-    const dirNames = [...scan.directories.keys()].sort();
-    // When scanning from strategies/, workshop-v3 becomes a top-level directory
+    const dirNames = [...scan.directoryTree.keys()].sort();
+    // When scanning from strategies/, workshop-v3 becomes a directory
     assert.ok(dirNames.includes('workshop-v3'));
     // Should not contain 'strategies' since we're inside it
     assert.ok(!dirNames.includes('strategies'));
   });
 
-  it('returns source files relative to baseDir', () => {
+  it('returns source files under the scanned baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
     const scan = scanCodebase(subDir);
-    // Files should be found inside the subdirectory
     assert.ok(scan.sourceFiles.length > 0);
-    // All files should be under the subDir
     for (const file of scan.sourceFiles) {
       assert.ok(file.startsWith(subDir), `${file} should start with ${subDir}`);
     }
   });
+
+  it('builds file-level dependency map', () => {
+    const scan = scanCodebase(projectDir);
+    // orchestrator.ts imports ./types and ./utils
+    assert.ok(scan.fileDependencies.has('orchestrator.ts'));
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps.internal.includes('utils.ts'));
+    assert.ok(deps.internal.length >= 1);
+  });
+
+  it('resolves imports to actual source files with extensions', () => {
+    const scan = scanCodebase(projectDir);
+    // strategies/workshop-v3/index.ts imports ./strategy which should resolve to strategy.ts
+    const indexDeps = scan.fileDependencies.get(path.join('strategies', 'workshop-v3', 'index.ts'));
+    assert.ok(indexDeps, 'index.ts should have dependencies');
+    assert.ok(
+      indexDeps.internal.some((d) => d.endsWith('strategy.ts')),
+      'Should resolve ./strategy to strategy.ts'
+    );
+  });
 });
 
 describe('formatInterview', () => {
-  it('produces output with directory structure section', () => {
+  it('produces output with Directory Tree section', () => {
     const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
-    assert.ok(output.includes('Directory Structure'));
-    assert.ok(output.includes('strategies/'));
+    assert.ok(output.includes('Directory Tree'));
+    assert.ok(output.includes('workshop-v3/'));
+  });
+
+  it('produces output with Dependency Map section', () => {
+    const scan = scanCodebase(projectDir);
+    const output = formatInterview(scan, projectDir);
+    assert.ok(output.includes('Dependency Map'));
+    // Should show file-level imports
+    assert.ok(output.includes('orchestrator.ts'));
+    assert.ok(output.includes('utils.ts'));
+  });
+
+  it('shows file-level import arrows in dependency map', () => {
+    const scan = scanCodebase(projectDir);
+    const output = formatInterview(scan, projectDir);
+    // orchestrator.ts imports utils.ts — should show as arrow
+    assert.ok(output.includes('\u2192 utils.ts'));
   });
 
   it('shows clean directory labels when using subdirectory as baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
     const scan = scanCodebase(subDir);
     const output = formatInterview(scan, subDir);
-    assert.ok(output.includes('Directory Structure'));
+    assert.ok(output.includes('Directory Tree'));
     assert.ok(output.includes('workshop-v3/'));
     // Should not contain '../' paths
     assert.ok(!output.includes('../'));
+  });
+
+  it('shows source files total count', () => {
+    const scan = scanCodebase(projectDir);
+    const output = formatInterview(scan, projectDir);
+    assert.ok(output.includes('source files total'));
   });
 });
