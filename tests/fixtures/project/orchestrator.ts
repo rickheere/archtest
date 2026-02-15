@@ -1,5 +1,6 @@
 import { Position } from './types';
 import { calculateBreakeven } from './utils';
+import express from 'express';
 
 export function processPosition(position: Position) {
   const breakeven = calculateBreakeven(position);

@@ -371,6 +371,7 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
 
     for (const imp of imports) {
       if (imp.startsWith('.')) {
+        // Relative import — resolve to actual source file path
         const resolvedPath = resolveImportPath(imp, file, baseDir, ext, sourceFileSet);
         if (resolvedPath) {
           if (!all.includes(resolvedPath)) {
@@ -382,8 +383,12 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
           }
         }
       } else {
+        // Non-relative import — include as-is for interview visibility
         if (!all.includes(imp)) {
           all.push(imp);
+        }
+        if (!rawImports.some((r) => r.raw === imp)) {
+          rawImports.push({ raw: imp, resolved: imp });
         }
       }
     }

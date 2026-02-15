@@ -1433,6 +1433,43 @@ describe('scanCodebase rawImports tracking', () => {
     assert.ok(utilsImport, 'Should have rawImport for utils.ts');
     assert.strictEqual(utilsImport.raw, './utils');
   });
+
+  it('includes non-relative imports in rawImports', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps, 'orchestrator.ts should have deps');
+    // orchestrator.ts imports 'express' (bare module)
+    const expressImport = deps.rawImports.find((i) => i.raw === 'express');
+    assert.ok(expressImport, 'Should have rawImport for bare module express');
+    assert.strictEqual(expressImport.resolved, 'express', 'Non-relative import resolved should equal raw');
+  });
+
+  it('non-relative imports appear in deps.all', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps.all.includes('express'), 'all should include bare module imports');
+  });
+
+  it('non-relative imports do NOT appear in deps.resolved', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(!deps.resolved.includes('express'), 'resolved should not include bare module imports');
+  });
+});
+
+describe('all imports shown in interview output', () => {
+  it('full interview shows non-relative imports', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatInterview(scan, projectDir);
+    assert.ok(output.includes('\u2192 express'), 'Full interview should show bare module imports');
+  });
+
+  it('full interview shows both relative and non-relative imports', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatInterview(scan, projectDir);
+    assert.ok(output.includes('\u2192 utils.ts'), 'Should show resolved relative import');
+    assert.ok(output.includes('\u2192 express'), 'Should show bare module import');
+  });
 });
 
 describe('paginated interview CLI', () => {
