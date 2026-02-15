@@ -599,8 +599,12 @@ function runInterview(flags) {
     showScopingHint();
 
     console.log('');
-    const topExt = extCounts.size > 0 ? [...extCounts.keys()][0] : '.js';
-    console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext ${topExt}${reset} to scan ${topExt.slice(1).toUpperCase() || 'those'} files.`);
+    if (extCounts.size > 0) {
+      const topExt = [...extCounts.keys()][0];
+      console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext ${topExt}${reset} to scan ${topExt.slice(1).toUpperCase()} files.`);
+    } else {
+      console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext <ext>${reset} to specify which files to scan.`);
+    }
     console.log('');
     return;
   }

@@ -1,5 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
@@ -727,6 +729,38 @@ describe('extension list filtering', () => {
     // Single-occurrence extensions should be filtered
     assert.ok(plain.includes('Extensions found:'));
     assert.ok(plain.includes('.ts'));
+  });
+});
+
+describe('no .js fallback when no extensions detected', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('does not suggest .js when no files are found in the project', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archtest-empty-'));
+    try {
+      const output = execFileSync(
+        process.execPath,
+        [cliPath, 'interview', '--base-dir', tmpDir],
+        { encoding: 'utf8' }
+      );
+      const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+      assert.ok(plain.includes('No extensions selected'));
+      assert.ok(plain.includes('--ext <ext>'), 'Should show generic --ext <ext> hint');
+      assert.ok(!plain.includes('--ext .js'), 'Should not suggest .js as fallback');
+    } finally {
+      fs.rmdirSync(tmpDir);
+    }
+  });
+
+  it('suggests the most common detected extension when files exist', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No extensions selected'));
+    assert.ok(plain.includes('--ext .ts'), 'Should suggest the most common extension');
   });
 });
 
