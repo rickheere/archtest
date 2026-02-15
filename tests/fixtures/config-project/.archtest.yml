@@ -1,0 +1,12 @@
+scan:
+  extensions: [.ts]
+  skip-dirs: [vendor]
+
+rules:
+  - name: no-console
+    description: "No console.log"
+    scope:
+      files: ["**/*.ts"]
+    deny:
+      patterns:
+        - "console\\.log"

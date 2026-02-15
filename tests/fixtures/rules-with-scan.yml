@@ -1,0 +1,14 @@
+scan:
+  extensions: [.ts, .js]
+  import-patterns:
+    - "require\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)"
+  skip-dirs: [vendor]
+
+rules:
+  - name: no-console-in-utils
+    description: "Utils should not use console.log"
+    scope:
+      files: ["utils.ts"]
+    deny:
+      patterns:
+        - "console\\.log"

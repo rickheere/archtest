@@ -6,7 +6,8 @@ const pkg = require('../package.json');
 
 /**
  * Parse a YAML rule file and return the config object.
- * Returns { rules, skip } where skip is an optional array of directory names.
+ * Returns { rules, skip, scan } where skip is an optional array of directory names
+ * and scan is an optional object with { extensions, importPatterns, skipDirs }.
  */
 function parseRuleFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
@@ -17,6 +18,21 @@ function parseRuleFile(filePath) {
   const result = { rules: doc.rules };
   if (Array.isArray(doc.skip)) {
     result.skip = doc.skip;
+  }
+  if (doc.scan && typeof doc.scan === 'object') {
+    const scan = {};
+    if (Array.isArray(doc.scan.extensions)) {
+      scan.extensions = new Set(
+        doc.scan.extensions.map((e) => (String(e).startsWith('.') ? String(e) : `.${e}`))
+      );
+    }
+    if (Array.isArray(doc.scan['import-patterns'])) {
+      scan.importPatterns = doc.scan['import-patterns'].map((p) => new RegExp(p, 'g'));
+    }
+    if (Array.isArray(doc.scan['skip-dirs'])) {
+      scan.skipDirs = doc.scan['skip-dirs'];
+    }
+    result.scan = scan;
   }
   return result;
 }
@@ -645,6 +661,7 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
   lines.push(`  1. Run ${cyan}archtest schema${reset} for the .archtest.yml format`);
   lines.push(`  2. Run ${cyan}archtest examples${reset} for common rule patterns`);
   lines.push(`  3. Save rules to ${cyan}.archtest.yml${reset} and run ${cyan}archtest${reset}`);
+  lines.push(`  4. Save scan settings to ${cyan}.archtest.yml${reset} under ${cyan}scan:${reset} so future runs need no flags`);
   lines.push('');
 
   return lines.join('\n');

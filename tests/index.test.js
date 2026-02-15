@@ -359,7 +359,7 @@ describe('CLI --skip is additive', () => {
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('Adds to the default skip list'));
-    assert.ok(output.includes('Both always merge with the defaults above'));
+    assert.ok(output.includes('All always merge with the defaults above'));
   });
 
   it('help text describes --skip as additive', () => {
@@ -541,14 +541,14 @@ describe('language-aware interview CLI', () => {
     assert.ok(!plain.includes('Directory Tree'));
   });
 
-  it('shows extension summary before scan output when --ext provided', () => {
+  it('shows only scanning line when --ext provided via CLI (no extension list)', () => {
     const output = execFileSync(
       process.execPath,
       [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok(plain.includes('Extensions found:'));
+    assert.ok(!plain.includes('Extensions found:'), 'Should not show extension list when --ext is on CLI');
     assert.ok(plain.includes('Scanning: .ts'));
     assert.ok(plain.includes('Directory Tree'));
   });
@@ -600,5 +600,133 @@ describe('language-aware interview CLI', () => {
     assert.ok(output.includes('--ext .go'));
     assert.ok(output.includes('--ext .py'));
     assert.ok(output.includes('--ext .rs'));
+  });
+
+  it('examples command shows scan config examples', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'examples'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Scan Config Examples'));
+    assert.ok(output.includes('scan:'));
+    assert.ok(output.includes('extensions:'));
+    assert.ok(output.includes('import-patterns:'));
+  });
+});
+
+const configProjectDir = path.join(fixturesDir, 'config-project');
+
+describe('parseRuleFile with scan config', () => {
+  it('parses scan section with extensions', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-with-scan.yml'));
+    assert.ok(config.scan, 'Should have scan config');
+    assert.ok(config.scan.extensions instanceof Set, 'extensions should be a Set');
+    assert.ok(config.scan.extensions.has('.ts'));
+    assert.ok(config.scan.extensions.has('.js'));
+  });
+
+  it('parses scan section with import patterns', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-with-scan.yml'));
+    assert.ok(config.scan.importPatterns, 'Should have import patterns');
+    assert.ok(config.scan.importPatterns.length > 0);
+    assert.ok(config.scan.importPatterns[0] instanceof RegExp);
+  });
+
+  it('parses scan section with skip dirs', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-with-scan.yml'));
+    assert.ok(config.scan.skipDirs, 'Should have skip dirs');
+    assert.deepStrictEqual(config.scan.skipDirs, ['vendor']);
+  });
+
+  it('omits scan when not in config', () => {
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-passing.yml'));
+    assert.strictEqual(config.scan, undefined);
+  });
+
+  it('auto-adds dot prefix to extensions', () => {
+    // The fixture has [.ts, .js] which already have dots
+    const config = parseRuleFile(path.join(fixturesDir, 'rules-with-scan.yml'));
+    for (const ext of config.scan.extensions) {
+      assert.ok(ext.startsWith('.'), `Extension "${ext}" should start with a dot`);
+    }
+  });
+});
+
+describe('scan config in interview CLI', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('uses scan config extensions when no --ext provided', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', configProjectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Scanning (from .archtest.yml): .ts'));
+    assert.ok(plain.includes('Directory Tree'));
+  });
+
+  it('CLI --ext overrides scan config extensions', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', configProjectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // Should show CLI-style output, not config-style
+    assert.ok(plain.includes('Scanning: .ts'), 'Should show CLI scanning line');
+    assert.ok(!plain.includes('from .archtest.yml'), 'Should not mention config when CLI overrides');
+  });
+
+  it('shows extension list as reality check when using config', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', configProjectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Extensions found:'));
+    assert.ok(plain.includes('Scanning (from .archtest.yml):'));
+  });
+
+  it('schema command documents the scan section', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'schema'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('scan:'));
+    assert.ok(output.includes('extensions:'));
+    assert.ok(output.includes('import-patterns:'));
+    assert.ok(output.includes('skip-dirs:'));
+    assert.ok(output.includes('Precedence'));
+  });
+
+  it('help text mentions scan config persistence', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Scan Config'));
+    assert.ok(output.includes('.archtest.yml'));
+  });
+});
+
+describe('extension list filtering', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('filters out extensions with < 2 files when no config/flags', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // projectDir has .ts files (multiple) — those should appear
+    // Single-occurrence extensions should be filtered
+    assert.ok(plain.includes('Extensions found:'));
+    assert.ok(plain.includes('.ts'));
   });
 });

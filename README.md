@@ -53,6 +53,10 @@ npx archtest --verbose   # Show all rules with per-file breakdown
 ## Example Rules
 
 ```yaml
+scan:
+  extensions: [.ts, .tsx]
+  skip-dirs: [vendor]
+
 rules:
   - name: no-deep-imports-into-auth
     description: "Import auth/ only through its index, not internal files"
@@ -72,6 +76,8 @@ rules:
         - "from ['\"].*database"
         - "prisma|knex|sequelize"
 ```
+
+The `scan` section persists interview settings so `archtest interview` works with no flags. CLI flags always override config.
 
 ## CI Integration
 

@@ -16,8 +16,9 @@ Architectural drift detection. Define boundaries in YAML, enforce with grep.
 3. Read the interview output — it shows cross-directory imports, mutual dependencies, and isolated modules
 4. Ask the developer about each finding: which boundaries matter, which coupling is intentional
 5. For each confirmed boundary, write a rule in `.archtest.yml`
-6. Run `npx archtest` to verify rules pass (or catch existing violations)
-7. Add `archtest` to the test script in package.json
+6. Save scan settings (extensions, import patterns, skip dirs) under the `scan:` key in `.archtest.yml` so future interview runs need no flags
+7. Run `npx archtest` to verify rules pass (or catch existing violations)
+8. Add `archtest` to the test script in package.json
 
 ### Writing Rules
 
@@ -67,15 +68,25 @@ deny:
 
 archtest works with any language. The rule engine (deny patterns + glob scopes) is language-agnostic.
 
-For the interview scanner, pass language-specific flags:
+For the interview scanner, pass language-specific flags or persist them in `.archtest.yml`:
 
+**CLI flags (one-off):**
 ```
 npx archtest interview --ext .py --import-pattern "(?:from|import)\s+(\S+)" --skip __pycache__,.git,venv
 npx archtest interview --ext .go --import-pattern "import\s+\"([^\"]+)\"" --skip vendor,.git
-npx archtest interview --ext .clj,.cljs --import-pattern ":require\s+\[([^\s\]]+)" --skip .git,target
 ```
 
-The `--ext` flag sets file extensions, `--import-pattern` sets regex where capture group 1 is the import target (can be repeated), and `--skip` sets directories to ignore.
+**Persisted config (recommended — future runs need no flags):**
+```yaml
+scan:
+  extensions: [.go]
+  import-patterns: ['^\s*"([^"]+)"']
+  skip-dirs: [vendor]
+```
+
+Run `npx archtest examples` to see scan config examples for Go, Python, Rust, Java, Clojure, and JS/TS.
+
+CLI flags always override config. The `--ext` flag sets file extensions, `--import-pattern` sets regex where capture group 1 is the import target (can be repeated), and `--skip` sets directories to ignore.
 
 For rule checking, use `--skip` to override the default skip list:
 ```
@@ -103,4 +114,4 @@ Read the violation output: it shows the exact file, line number, and matching co
 
 ### Maintaining Rules
 
-When the codebase grows, re-run `npx archtest interview` to discover new cross-directory dependencies that may need rules. Run `npx archtest --verbose` to see which files each rule checks.
+When the codebase grows, re-run `npx archtest interview` to discover new cross-directory dependencies that may need rules. If scan settings are saved in `.archtest.yml`, the interview runs with no extra flags. Run `npx archtest --verbose` to see which files each rule checks.

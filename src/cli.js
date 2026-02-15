@@ -38,13 +38,19 @@ ${bold}Commands:${reset}
 
 ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --base-dir <path>        Set root directory for scanning ${dim}(default: cwd)${reset}
-  --ext <exts>             Comma-separated file extensions to scan ${dim}(required)${reset}
+  --ext <exts>             Comma-separated file extensions to scan
                            ${dim}e.g. --ext .go  or  --ext .py,.pyi${reset}
+                           ${dim}Can also be set in .archtest.yml scan.extensions${reset}
   --skip-ext <exts>        Comma-separated extensions to exclude from scan
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Default: JS require/import patterns.${reset}
+                           ${dim}Can also be set in .archtest.yml scan.import-patterns${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
+                           ${dim}Can also be set in .archtest.yml scan.skip-dirs${reset}
   --full                   Disable auto-exclusion of large directories
+
+${bold}Scan Config:${reset} ${dim}Persist scan settings in .archtest.yml so they apply automatically.${reset}
+  CLI flags always override config. See ${cyan}archtest schema${reset} for the format.
 
 ${bold}Import Pattern Examples:${reset} ${dim}(for non-JS/TS projects)${reset}
   ${cyan}Go:${reset}     --import-pattern '^\\s*"([^"]+)"'
@@ -66,6 +72,14 @@ function showSchema() {
   console.log(`
 ${bold}YAML Rule File Schema${reset} ${dim}(.archtest.yml)${reset}
 ${dim}${'─'.repeat(50)}${reset}
+
+${bold}scan:${reset}                            ${dim}# Optional. Persist interview scan settings.${reset}
+  ${bold}extensions:${reset}                    ${dim}# File extensions to scan.${reset}
+    - .go                        ${dim}# Same as --ext .go on CLI.${reset}
+  ${bold}import-patterns:${reset}               ${dim}# Regex patterns for import extraction.${reset}
+    - '^\\s*"([^"]+)"'            ${dim}# Capture group 1 = import target.${reset}
+  ${bold}skip-dirs:${reset}                     ${dim}# Extra directories to skip during scanning.${reset}
+    - vendor                     ${dim}# Adds to the default skip list.${reset}
 
 ${bold}skip:${reset}                            ${dim}# Optional. Array of directory names to skip.${reset}
   - .next                        ${dim}# Adds to the default skip list.${reset}
@@ -116,8 +130,15 @@ ${dim}${'─'.repeat(50)}${reset}
   Default: node_modules, .git, .next, dist, build, _generated,
            coverage, .turbo, .cache
   Add in config:      ${cyan}skip: [vendor, __pycache__]${reset}
+  Or in scan config:  ${cyan}scan: { skip-dirs: [vendor, __pycache__] }${reset}
   Add on CLI:          ${cyan}--skip vendor,__pycache__${reset}
-  Both always merge with the defaults above.
+  All always merge with the defaults above.
+
+${bold}Precedence${reset}
+${dim}${'─'.repeat(50)}${reset}
+  CLI flags ${dim}(highest)${reset} > .archtest.yml scan config > defaults
+  CLI --ext .py overrides scan.extensions in config.
+  When no flags and no config, extension guidance is shown.
 
 ${bold}Base Directory${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -197,9 +218,47 @@ ${yellow}# Prevent accidental secrets in code${reset}
     patterns:
       - "(api_key|apikey|secret_key|password)\\\\s*[=:]\\\\s*['\"][^'\\\"]{8,}"
 
-${bold}Multi-Language Interview${reset}
+${bold}Scan Config Examples${reset} ${dim}(persist in .archtest.yml)${reset}
 ${dim}${'─'.repeat(50)}${reset}
-archtest is language-agnostic. Use --ext and --import-pattern for any language:
+Once you find the right flags, save them so future runs just work:
+
+  ${cyan}Go:${reset}
+    scan:
+      extensions: [.go]
+      import-patterns: ['^\\s*"([^"]+)"']
+
+  ${cyan}Python:${reset}
+    scan:
+      extensions: [.py, .pyi]
+      import-patterns:
+        - 'from\\s+(\\S+)\\s+import'
+        - 'import\\s+(\\S+)'
+      skip-dirs: [__pycache__, venv, .venv]
+
+  ${cyan}Rust:${reset}
+    scan:
+      extensions: [.rs]
+      import-patterns: ['use\\s+([\\w:]+)']
+      skip-dirs: [target]
+
+  ${cyan}Java:${reset}
+    scan:
+      extensions: [.java]
+      import-patterns: ['import\\s+([\\w.]+)']
+      skip-dirs: [build, .gradle]
+
+  ${cyan}JS/TS:${reset} ${dim}(default — no scan config needed)${reset}
+    scan:
+      extensions: [.ts, .tsx, .js, .jsx]
+
+  ${cyan}Clojure:${reset}
+    scan:
+      extensions: [.clj, .cljs, .cljc]
+      import-patterns: [':require\\s+\\[([^\\s\\]]+)']
+      skip-dirs: [target, .cpcache]
+
+${bold}Multi-Language Interview${reset} ${dim}(CLI flags — same settings, one-off)${reset}
+${dim}${'─'.repeat(50)}${reset}
 
   ${cyan}Go:${reset}
     archtest interview --ext .go --import-pattern '^\\s*"([^"]+)"'
@@ -224,7 +283,14 @@ function runInit() {
     process.exit(1);
   }
 
-  const template = `# Extra directories to skip during scanning (adds to defaults).
+  const template = `# Scan settings for 'archtest interview'. Persist so future runs just work.
+# CLI flags (--ext, --import-pattern, --skip) always override these.
+# scan:
+#   extensions: [.ts, .tsx, .js, .jsx]
+#   import-patterns: ['^\\s*"([^"]+)"']
+#   skip-dirs: [vendor]
+
+# Extra directories to skip during scanning (adds to defaults).
 # Default: node_modules, .git, .next, dist, build, _generated, coverage, .turbo, .cache
 # Uncomment to add more:
 # skip:
@@ -310,39 +376,103 @@ function parseFlags(args) {
     extensions,
     skipExtensions,
     importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
+    importPatternsFromCli: importPatterns.length > 0,
     baseDir,
     full,
     remaining,
   };
 }
 
+/**
+ * Load scan config from .archtest.yml if it exists.
+ * Returns { scan, skip } or null if no config file.
+ */
+function loadScanConfig(baseDir) {
+  const configPath = path.join(baseDir, '.archtest.yml');
+  if (!fs.existsSync(configPath)) return null;
+  try {
+    const config = parseRuleFile(configPath);
+    return config;
+  } catch {
+    return null;
+  }
+}
+
 function runInterview(flags) {
   const baseDir = flags.baseDir || process.cwd();
 
-  // Walk all files to count extensions (cheap — one directory walk)
-  const allFiles = walkDir(baseDir, flags.skipDirs);
-  const extCounts = countExtensions(allFiles);
+  // Load scan config from .archtest.yml
+  const config = loadScanConfig(baseDir);
+  const scanConfig = config && config.scan ? config.scan : null;
+
+  // Determine effective extensions: CLI > config > none
+  const extFromCli = flags.extensions;
+  const extFromConfig = scanConfig && scanConfig.extensions ? scanConfig.extensions : null;
+  let effectiveExtensions = extFromCli || extFromConfig || null;
+  const extSource = extFromCli ? 'cli' : (extFromConfig ? 'config' : null);
 
   // Apply --skip-ext filter if provided
-  let effectiveExtensions = flags.extensions;
   if (effectiveExtensions && flags.skipExtensions) {
     effectiveExtensions = new Set(
       [...effectiveExtensions].filter((e) => !flags.skipExtensions.has(e))
     );
   }
 
-  // Always show extension summary
-  if (extCounts.size > 0) {
-    const summary = [...extCounts.entries()]
-      .map(([ext, count]) => `${ext} (${count})`)
-      .join(', ');
-    console.log(`${dim}Extensions found: ${summary}${reset}`);
-  } else {
-    console.log(`${dim}No files found in ${baseDir}${reset}`);
+  // Determine effective import patterns: CLI > config > defaults
+  const importPatternsFromCli = flags.importPatternsFromCli;
+  let effectiveImportPatterns = flags.importPatterns;
+  if (!importPatternsFromCli && scanConfig && scanConfig.importPatterns) {
+    effectiveImportPatterns = scanConfig.importPatterns;
   }
 
-  // If no --ext provided, show guidance and exit
-  if (!effectiveExtensions) {
+  // Determine effective skip dirs: CLI > config scan.skip-dirs > config top-level skip > defaults
+  let effectiveSkipDirs = flags.skipDirs;
+  if (!flags.skipFromCli) {
+    if (scanConfig && scanConfig.skipDirs) {
+      effectiveSkipDirs = new Set([...DEFAULT_SKIP_DIRS, ...scanConfig.skipDirs]);
+    } else if (config && config.skip) {
+      effectiveSkipDirs = new Set([...DEFAULT_SKIP_DIRS, ...config.skip]);
+    }
+  }
+
+  // Walk all files to count extensions (cheap — one directory walk)
+  const allFiles = walkDir(baseDir, effectiveSkipDirs);
+  const extCounts = countExtensions(allFiles);
+
+  // Display extension summary based on context
+  if (extSource === 'cli') {
+    // CLI flags provided — just show what we're scanning, skip full list
+    if (effectiveExtensions.size > 0) {
+      console.log(`${dim}Scanning: ${[...effectiveExtensions].join(', ')}${reset}`);
+    }
+  } else if (extSource === 'config') {
+    // Config provided — show extensions found as reality check + what config says
+    if (extCounts.size > 0) {
+      const filtered = [...extCounts.entries()].filter(([, count]) => count >= 2);
+      const top = filtered.slice(0, 15);
+      const remaining = filtered.length - top.length;
+      const summary = top.map(([ext, count]) => `${ext} (${count})`).join(', ');
+      console.log(`${dim}Extensions found: ${summary}${remaining > 0 ? `, ...and ${remaining} more` : ''}${reset}`);
+    }
+    if (effectiveExtensions.size > 0) {
+      console.log(`${dim}Scanning (from .archtest.yml): ${[...effectiveExtensions].join(', ')}${reset}`);
+    }
+  } else {
+    // No config, no flags — show filtered/capped extension list + guidance
+    if (extCounts.size > 0) {
+      const filtered = [...extCounts.entries()].filter(([, count]) => count >= 2);
+      const top = filtered.slice(0, 15);
+      const remaining = filtered.length - top.length;
+      if (top.length > 0) {
+        const summary = top.map(([ext, count]) => `${ext} (${count})`).join(', ');
+        console.log(`${dim}Extensions found: ${summary}${remaining > 0 ? `, ...and ${remaining} more` : ''}${reset}`);
+      } else {
+        console.log(`${dim}No files found in ${baseDir}${reset}`);
+      }
+    } else {
+      console.log(`${dim}No files found in ${baseDir}${reset}`);
+    }
+
     console.log('');
     const topExt = extCounts.size > 0 ? [...extCounts.keys()][0] : '.js';
     console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext ${topExt}${reset} to scan ${topExt.slice(1).toUpperCase() || 'those'} files.`);
@@ -350,14 +480,10 @@ function runInterview(flags) {
     return;
   }
 
-  if (effectiveExtensions.size > 0) {
-    console.log(`${dim}Scanning: ${[...effectiveExtensions].join(', ')}${reset}`);
-  }
-
   let scan = scanCodebase(baseDir, {
     extensions: effectiveExtensions,
-    importPatterns: flags.importPatterns,
-    skipDirs: flags.skipDirs,
+    importPatterns: effectiveImportPatterns,
+    skipDirs: effectiveSkipDirs,
   });
 
   let excludedDirs = [];
