@@ -26,7 +26,7 @@ ${bold}Options:${reset}
   --config <path>    Path to rule file ${dim}(default: .archtest.yml)${reset}
   --base-dir <path>  Set root directory for scanning ${dim}(default: cwd)${reset}
   --verbose          Show all rules and per-file breakdown
-  --skip <dirs>      Comma-separated directories to skip ${dim}(overrides config and defaults)${reset}
+  --skip <dirs>      Comma-separated directories to skip ${dim}(adds to defaults)${reset}
   --help, -h         Show this help message
 
 ${bold}Commands:${reset}
@@ -41,7 +41,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
                            ${dim}(default: .js,.ts,.jsx,.tsx,.mjs,.cjs)${reset}
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Default: JS require/import patterns.${reset}
-  --skip <dirs>            Comma-separated directories to skip ${dim}(overrides config and defaults)${reset}
+  --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
 
 ${yellow}AI-first architectural testing.${reset} Define boundaries in YAML, enforce
 them with grep-based pattern matching. Rules are designed to be
@@ -60,8 +60,8 @@ ${bold}YAML Rule File Schema${reset} ${dim}(.archtest.yml)${reset}
 ${dim}${'─'.repeat(50)}${reset}
 
 ${bold}skip:${reset}                            ${dim}# Optional. Array of directory names to skip.${reset}
-  - .next                        ${dim}# Overrides the default skip list when present.${reset}
-  - dist                         ${dim}# CLI --skip overrides this config value.${reset}
+  - .next                        ${dim}# Adds to the default skip list.${reset}
+  - dist                         ${dim}# CLI --skip takes priority over this config value.${reset}
   - _generated
 
 ${bold}rules:${reset}                           ${dim}# Required. Array of rule objects.${reset}
@@ -107,9 +107,9 @@ ${bold}Skipped Directories${reset}
 ${dim}${'─'.repeat(50)}${reset}
   Default: node_modules, .git, .next, dist, build, _generated,
            coverage, .turbo, .cache
-  Override in config:  ${cyan}skip: [vendor, .git, __pycache__]${reset}
-  Override on CLI:     ${cyan}--skip vendor,.git,__pycache__${reset}
-  Priority: CLI > config > defaults
+  Add in config:      ${cyan}skip: [vendor, __pycache__]${reset}
+  Add on CLI:          ${cyan}--skip vendor,__pycache__${reset}
+  Both always merge with the defaults above.
 
 ${bold}Base Directory${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -198,13 +198,12 @@ function runInit() {
     process.exit(1);
   }
 
-  const template = `# Directories to skip during scanning (overrides defaults).
+  const template = `# Extra directories to skip during scanning (adds to defaults).
 # Default: node_modules, .git, .next, dist, build, _generated, coverage, .turbo, .cache
-# Uncomment to customize:
+# Uncomment to add more:
 # skip:
-#   - node_modules
-#   - .git
 #   - vendor
+#   - __pycache__
 
 rules:
   # Example: prevent deep imports into a module
@@ -256,7 +255,7 @@ function parseFlags(args) {
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--skip' && args[i + 1]) {
-      skipDirs = new Set(args[i + 1].split(',').map((s) => s.trim()));
+      skipDirs = new Set([...DEFAULT_SKIP_DIRS, ...args[i + 1].split(',').map((s) => s.trim())]);
       i++;
     } else if (args[i] === '--ext' && args[i + 1]) {
       extensions = new Set(args[i + 1].split(',').map((s) => s.trim().startsWith('.') ? s.trim() : `.${s.trim()}`));
@@ -330,7 +329,7 @@ function main() {
   // Priority: CLI --skip > config skip > DEFAULT_SKIP_DIRS
   let skipDirs = flags.skipDirs;
   if (!flags.skipFromCli && config.skip) {
-    skipDirs = new Set(config.skip);
+    skipDirs = new Set([...DEFAULT_SKIP_DIRS, ...config.skip]);
   }
 
   const baseDir = flags.baseDir || process.cwd();

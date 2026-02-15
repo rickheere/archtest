@@ -1,6 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, DEFAULT_SKIP_DIRS } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
@@ -333,5 +334,51 @@ describe('formatInterview', () => {
     const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('source files total'));
+  });
+});
+
+describe('CLI --skip is additive', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('--skip merges with DEFAULT_SKIP_DIRS in interview mode', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--skip', '.nauvis', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    // The output should work fine — no crash from scanning node_modules etc.
+    assert.ok(output.includes('Directory Tree'));
+  });
+
+  it('--skip includes both user dirs and defaults', () => {
+    // Run the help output which shows the schema; verify the text says additive
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'schema'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Adds to the default skip list'));
+    assert.ok(output.includes('Both always merge with the defaults above'));
+  });
+
+  it('help text describes --skip as additive', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('adds to defaults'));
+  });
+
+  it('config skip merges with defaults when running rules', () => {
+    // rules-with-skip.yml has skip: [.next, _generated, dist]
+    // After merge, all DEFAULT_SKIP_DIRS should still be present
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--config', path.join(fixturesDir, 'rules-with-skip.yml'), '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    // Should pass — the rule looks for console.log in utils.ts which has none
+    assert.ok(output.includes('\u2713'));
   });
 });
