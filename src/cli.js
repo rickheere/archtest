@@ -5,6 +5,7 @@ const path = require('path');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
   detectSuspiciousDirs, filterScanResults, walkDir, countExtensions,
+  detectLanguageFamilies, extensionsByTopDir,
   DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 } = require('./index');
 
@@ -26,6 +27,7 @@ ${bold}Usage:${reset}
 ${bold}Options:${reset}
   --config <path>    Path to rule file ${dim}(default: .archtest.yml)${reset}
   --base-dir <path>  Set root directory for scanning ${dim}(default: cwd)${reset}
+                     ${dim}.archtest.yml is looked up from here, cascading to parent dirs${reset}
   --verbose          Show all rules and per-file breakdown
   --skip <dirs>      Comma-separated directories to skip ${dim}(adds to defaults)${reset}
   --help, -h         Show this help message
@@ -147,6 +149,15 @@ ${dim}${'─'.repeat(50)}${reset}
   Default: current working directory
   Override with: ${cyan}--base-dir src/${reset}
   Scans and groups directories relative to the specified path.
+
+${bold}Cascading Config Lookup${reset}
+${dim}${'─'.repeat(50)}${reset}
+  When ${cyan}--base-dir${reset} is set, .archtest.yml is searched in this order:
+    1. The --base-dir directory itself
+    2. Each parent directory, up to the repository root
+    3. The working directory (if not already covered)
+  Nearest config wins. This lets each sub-project in a monorepo
+  own its own scan config while sharing rules from a parent.
 
 ${bold}Exit Codes${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -275,6 +286,31 @@ ${dim}${'─'.repeat(50)}${reset}
 
   ${cyan}Java:${reset}
     archtest interview --ext .java --import-pattern 'import\\s+([\\w.]+)'
+
+${bold}Monorepo Setup${reset} ${dim}(per-sub-project configs)${reset}
+${dim}${'─'.repeat(50)}${reset}
+  Each sub-project gets its own .archtest.yml with scan settings.
+  Config is found via cascading lookup: --base-dir → parent dirs → repo root.
+
+  ${dim}# Repo layout:${reset}
+  ${dim}#   .archtest.yml         (shared rules)${reset}
+  ${dim}#   backend/.archtest.yml (Clojure scan config)${reset}
+  ${dim}#   mobile/.archtest.yml  (JS/Swift scan config)${reset}
+
+  ${cyan}backend/.archtest.yml:${reset}
+    scan:
+      extensions: [.clj, .cljs]
+      import-patterns: ['\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)']
+    rules: []
+
+  ${cyan}mobile/.archtest.yml:${reset}
+    scan:
+      extensions: [.js, .jsx, .swift]
+    rules: []
+
+  ${dim}# Interview each sub-project independently:${reset}
+    archtest interview --base-dir backend/
+    archtest interview --base-dir mobile/
 `);
 }
 
@@ -386,18 +422,61 @@ function parseFlags(args) {
 }
 
 /**
- * Load scan config from .archtest.yml if it exists.
- * Returns { scan, skip } or null if no config file.
+ * Find the git repository root by walking up from dir.
+ * Returns the repo root path, or null if not in a git repo.
+ */
+function findRepoRoot(dir) {
+  let current = path.resolve(dir);
+  const { root } = path.parse(current);
+  while (current !== root) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    current = path.dirname(current);
+  }
+  return null;
+}
+
+/**
+ * Load scan config from .archtest.yml using cascading lookup.
+ * Searches in this order (nearest wins):
+ *   1. baseDir itself
+ *   2. Each parent directory up to the repo root (or filesystem root)
+ *   3. cwd (if different from above)
+ * Returns { scan, skip, configDir } or null if no config file found.
  */
 function loadScanConfig(baseDir) {
-  const configPath = path.join(baseDir, '.archtest.yml');
-  if (!fs.existsSync(configPath)) return null;
-  try {
-    const config = parseRuleFile(configPath);
-    return config;
-  } catch {
-    return null;
+  const repoRoot = findRepoRoot(baseDir);
+  const stopAt = repoRoot || path.parse(path.resolve(baseDir)).root;
+  const cwd = process.cwd();
+
+  // Build candidate directories: baseDir → parents → stop
+  const candidates = [];
+  let current = path.resolve(baseDir);
+  while (true) {
+    candidates.push(current);
+    if (current === stopAt) break;
+    const parent = path.dirname(current);
+    if (parent === current) break; // filesystem root
+    current = parent;
   }
+
+  // Add cwd if not already covered
+  const resolvedCwd = path.resolve(cwd);
+  if (!candidates.includes(resolvedCwd)) {
+    candidates.push(resolvedCwd);
+  }
+
+  for (const dir of candidates) {
+    const configPath = path.join(dir, '.archtest.yml');
+    if (!fs.existsSync(configPath)) continue;
+    try {
+      const config = parseRuleFile(configPath);
+      config.configDir = dir;
+      return config;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 function runInterview(flags) {
@@ -447,12 +526,29 @@ function runInterview(flags) {
   const allFiles = walkDir(baseDir, effectiveSkipDirs);
   const extCounts = countExtensions(allFiles);
 
+  // Helper: show multi-language scoping hint when 3+ language families detected
+  const showScopingHint = () => {
+    const families = detectLanguageFamilies(extCounts);
+    if (families.size >= 3) {
+      const dirBreakdown = extensionsByTopDir(allFiles, baseDir);
+      if (dirBreakdown.size > 0) {
+        console.log('');
+        console.log(`${yellow}Multiple language families detected.${reset} Consider scoping with ${cyan}--base-dir${reset}:`);
+        for (const [dir, exts] of dirBreakdown) {
+          const extSummary = [...exts.entries()].map(([e, c]) => `${e} (${c})`).join(', ');
+          console.log(`  ${dir}/    ${dim}${extSummary}${reset}`);
+        }
+      }
+    }
+  };
+
   // Display extension summary based on context
   if (extSource === 'cli') {
     // CLI flags provided — just show what we're scanning, skip full list
     if (effectiveExtensions.size > 0) {
       console.log(`${dim}Scanning: ${[...effectiveExtensions].join(', ')}${reset}`);
     }
+    showScopingHint();
   } else if (extSource === 'config') {
     // Config provided — show extensions found as reality check + what config says
     if (extCounts.size > 0) {
@@ -465,6 +561,7 @@ function runInterview(flags) {
     if (effectiveExtensions.size > 0) {
       console.log(`${dim}Scanning (from .archtest.yml): ${[...effectiveExtensions].join(', ')}${reset}`);
     }
+    showScopingHint();
   } else {
     // No config, no flags — show filtered/capped extension list + guidance
     if (extCounts.size > 0) {
@@ -480,6 +577,8 @@ function runInterview(flags) {
     } else {
       console.log(`${dim}No files found in ${baseDir}${reset}`);
     }
+
+    showScopingHint();
 
     console.log('');
     const topExt = extCounts.size > 0 ? [...extCounts.keys()][0] : '.js';

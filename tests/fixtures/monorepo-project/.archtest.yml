@@ -1,0 +1,11 @@
+scan:
+  extensions: [.js, .ts]
+
+rules:
+  - name: no-console
+    description: "No console.log"
+    scope:
+      files: ["**/*.js"]
+    deny:
+      patterns:
+        - "console\\.log"

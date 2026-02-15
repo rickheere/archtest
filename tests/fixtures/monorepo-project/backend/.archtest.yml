@@ -1,0 +1,12 @@
+scan:
+  extensions: [.clj]
+  import-patterns: ['\[([a-z][a-z0-9.-]+\.[a-z][a-z0-9.-]+)']
+
+rules:
+  - name: no-direct-db
+    description: "Handlers should not directly use SQL"
+    scope:
+      files: ["**/*.clj"]
+    deny:
+      patterns:
+        - "SELECT|INSERT|UPDATE|DELETE"

@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, DEFAULT_SKIP_DIRS } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -786,5 +786,187 @@ describe('additive import patterns (CLI + config)', () => {
     );
     assert.ok(output.includes('adds to'));
     assert.ok(output.includes('import-pattern'));
+  });
+});
+
+const monorepoDir = path.join(fixturesDir, 'monorepo-project');
+
+describe('detectLanguageFamilies', () => {
+  it('detects distinct language families from extension counts', () => {
+    const extCounts = new Map([
+      ['.clj', 3], ['.js', 5], ['.swift', 2],
+    ]);
+    const families = detectLanguageFamilies(extCounts);
+    assert.strictEqual(families.size, 3);
+    assert.ok(families.has('clojure'));
+    assert.ok(families.has('js'));
+    assert.ok(families.has('apple'));
+  });
+
+  it('groups related extensions into same family', () => {
+    const extCounts = new Map([
+      ['.ts', 10], ['.tsx', 5], ['.js', 3], ['.jsx', 2],
+    ]);
+    const families = detectLanguageFamilies(extCounts);
+    assert.strictEqual(families.size, 1);
+    assert.ok(families.has('js'));
+  });
+
+  it('ignores unknown extensions', () => {
+    const extCounts = new Map([
+      ['.xyz', 5], ['.abc', 3],
+    ]);
+    const families = detectLanguageFamilies(extCounts);
+    assert.strictEqual(families.size, 0);
+  });
+});
+
+describe('extensionsByTopDir', () => {
+  it('groups extensions by top-level directory', () => {
+    const allFiles = walkDir(monorepoDir, DEFAULT_SKIP_DIRS);
+    const result = extensionsByTopDir(allFiles, monorepoDir);
+    assert.ok(result.has('backend'), 'Should have backend dir');
+    assert.ok(result.has('mobile'), 'Should have mobile dir');
+    // Backend should have .clj
+    assert.ok(result.get('backend').has('.clj'));
+    // Mobile should have .js and/or .swift
+    const mobileExts = result.get('mobile');
+    assert.ok(mobileExts.has('.js') || mobileExts.has('.swift'));
+  });
+
+  it('shows top 2 extensions per directory', () => {
+    const allFiles = walkDir(monorepoDir, DEFAULT_SKIP_DIRS);
+    const result = extensionsByTopDir(allFiles, monorepoDir);
+    for (const [, exts] of result) {
+      assert.ok(exts.size <= 2, 'Should show at most 2 extensions per dir');
+    }
+  });
+
+  it('skips root-level files', () => {
+    const allFiles = ['/base/root.js', '/base/sub/file.ts'];
+    const result = extensionsByTopDir(allFiles, '/base');
+    assert.ok(!result.has('.'), 'Should not include root-level files');
+    assert.ok(result.has('sub'));
+  });
+});
+
+describe('LANGUAGE_FAMILIES', () => {
+  it('covers common language extensions', () => {
+    const expected = ['.js', '.ts', '.py', '.go', '.rs', '.java', '.clj', '.swift', '.rb', '.c', '.cpp'];
+    for (const ext of expected) {
+      assert.ok(LANGUAGE_FAMILIES[ext], `Should have family for ${ext}`);
+    }
+  });
+});
+
+describe('cascading config lookup', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('finds config in --base-dir directory', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', path.join(monorepoDir, 'backend')],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // backend/.archtest.yml has extensions: [.clj]
+    assert.ok(plain.includes('Scanning (from .archtest.yml): .clj'));
+  });
+
+  it('cascades to parent when --base-dir has no config', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', path.join(monorepoDir, 'mobile')],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // mobile/ has no .archtest.yml, should find monorepo-project/.archtest.yml
+    // which has extensions: [.js, .ts]
+    assert.ok(plain.includes('Scanning (from .archtest.yml):'));
+    assert.ok(plain.includes('.js'));
+  });
+
+  it('nearest config wins over parent config', () => {
+    // backend/.archtest.yml has .clj, monorepo-project/.archtest.yml has .js,.ts
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', path.join(monorepoDir, 'backend')],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('.clj'), 'Should use backend config with .clj');
+    assert.ok(!plain.includes('Scanning (from .archtest.yml): .js'), 'Should not use parent config .js');
+  });
+});
+
+describe('multi-language scoping hint', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('shows scoping hint when 3+ language families detected', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', monorepoDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Multiple language families detected'));
+    assert.ok(plain.includes('--base-dir'));
+  });
+
+  it('shows per-directory extension breakdown', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', monorepoDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('backend/'));
+    assert.ok(plain.includes('.clj'));
+    assert.ok(plain.includes('mobile/'));
+  });
+
+  it('does not show scoping hint for single-language projects', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(!plain.includes('Multiple language families detected'));
+  });
+});
+
+describe('documentation updates', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('help text mentions config lookup relative to --base-dir', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('cascading'));
+  });
+
+  it('schema documents cascading config lookup', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'schema'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Cascading Config Lookup'));
+    assert.ok(output.includes('Nearest config wins'));
+  });
+
+  it('examples show monorepo setup', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'examples'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('Monorepo Setup'));
+    assert.ok(output.includes('backend/.archtest.yml'));
+    assert.ok(output.includes('mobile/.archtest.yml'));
+    assert.ok(output.includes('--base-dir backend/'));
   });
 });

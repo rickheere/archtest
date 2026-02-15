@@ -622,9 +622,94 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
   return lines.join('\n');
 }
 
+/**
+ * Map file extensions to language families for multi-language detection.
+ */
+const LANGUAGE_FAMILIES = {
+  '.js': 'js', '.jsx': 'js', '.ts': 'js', '.tsx': 'js', '.mjs': 'js', '.cjs': 'js',
+  '.py': 'python', '.pyi': 'python', '.pyx': 'python',
+  '.go': 'go',
+  '.rs': 'rust',
+  '.java': 'jvm', '.kt': 'jvm', '.kts': 'jvm', '.scala': 'jvm', '.groovy': 'jvm',
+  '.clj': 'clojure', '.cljs': 'clojure', '.cljc': 'clojure',
+  '.rb': 'ruby', '.erb': 'ruby',
+  '.swift': 'apple', '.m': 'apple', '.mm': 'apple',
+  '.c': 'c-cpp', '.cpp': 'c-cpp', '.cc': 'c-cpp', '.cxx': 'c-cpp', '.h': 'c-cpp', '.hpp': 'c-cpp',
+  '.cs': 'dotnet', '.fs': 'dotnet', '.vb': 'dotnet',
+  '.php': 'php',
+  '.ex': 'elixir', '.exs': 'elixir',
+  '.erl': 'erlang', '.hrl': 'erlang',
+  '.hs': 'haskell', '.lhs': 'haskell',
+  '.lua': 'lua',
+  '.r': 'r', '.R': 'r',
+  '.dart': 'dart',
+  '.zig': 'zig',
+  '.nim': 'nim',
+};
+
+/**
+ * Detect distinct language families from an extension count map.
+ * Returns a Set of family names found.
+ */
+function detectLanguageFamilies(extCounts) {
+  const families = new Set();
+  for (const ext of extCounts.keys()) {
+    const family = LANGUAGE_FAMILIES[ext];
+    if (family) families.add(family);
+  }
+  return families;
+}
+
+/**
+ * Build a per-top-level-directory extension breakdown.
+ * Returns a Map of topDir → Map<ext, count>, sorted by total file count descending.
+ * Only includes directories at depth 1 (immediate children of baseDir).
+ *
+ * @param {string[]} allFiles - Array of absolute file paths
+ * @param {string} baseDir - The base directory
+ * @returns {Map<string, Map<string, number>>}
+ */
+function extensionsByTopDir(allFiles, baseDir) {
+  const dirExts = new Map();
+
+  for (const file of allFiles) {
+    const rel = path.relative(baseDir, file);
+    const parts = rel.split(path.sep);
+    if (parts.length < 2) continue; // skip root-level files
+    const topDir = parts[0];
+    const ext = path.extname(file);
+    if (!ext) continue;
+
+    if (!dirExts.has(topDir)) dirExts.set(topDir, new Map());
+    const extMap = dirExts.get(topDir);
+    extMap.set(ext, (extMap.get(ext) || 0) + 1);
+  }
+
+  // Sort directories by total file count descending
+  const sorted = [...dirExts.entries()].sort((a, b) => {
+    const totalA = [...a[1].values()].reduce((s, n) => s + n, 0);
+    const totalB = [...b[1].values()].reduce((s, n) => s + n, 0);
+    return totalB - totalA;
+  });
+
+  // For each directory, sort extensions by count and keep top 2
+  const result = new Map();
+  for (const [dir, extMap] of sorted) {
+    const topExts = [...extMap.entries()]
+      .filter(([ext]) => LANGUAGE_FAMILIES[ext]) // only known language extensions
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2);
+    if (topExts.length > 0) {
+      result.set(dir, new Map(topExts));
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   parseRuleFile, resolveGlobs, checkFile, runRules, formatResults,
   scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults,
-  walkDir, countExtensions,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
+  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
+  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES,
 };
