@@ -2,11 +2,10 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, DEFAULT_SKIP_DIRS } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, DEFAULT_SKIP_DIRS } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
-const JS_TS_EXT = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
 
 describe('parseRuleFile', () => {
   it('parses a valid YAML rule file', () => {
@@ -242,7 +241,7 @@ describe('DEFAULT_SKIP_DIRS', () => {
 
 describe('scanCodebase', () => {
   it('builds full directory tree with nested paths', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     const dirNames = [...scan.directoryTree.keys()].sort();
     // Should have root files and nested strategy directory
     assert.ok(dirNames.includes('.'));
@@ -250,7 +249,7 @@ describe('scanCodebase', () => {
   });
 
   it('directoryTree contains filenames per directory', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     // Root should contain orchestrator.ts and utils.ts
     const rootFiles = scan.directoryTree.get('.');
     assert.ok(rootFiles.includes('orchestrator.ts'));
@@ -259,7 +258,7 @@ describe('scanCodebase', () => {
 
   it('uses subdirectory as baseDir to scope the tree', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir);
     const dirNames = [...scan.directoryTree.keys()].sort();
     // When scanning from strategies/, workshop-v3 becomes a directory
     assert.ok(dirNames.includes('workshop-v3'));
@@ -269,7 +268,7 @@ describe('scanCodebase', () => {
 
   it('returns source files under the scanned baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir);
     assert.ok(scan.sourceFiles.length > 0);
     for (const file of scan.sourceFiles) {
       assert.ok(file.startsWith(subDir), `${file} should start with ${subDir}`);
@@ -277,7 +276,7 @@ describe('scanCodebase', () => {
   });
 
   it('builds file-level dependency map', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     // orchestrator.ts imports ./types and ./utils
     assert.ok(scan.fileDependencies.has('orchestrator.ts'));
     const deps = scan.fileDependencies.get('orchestrator.ts');
@@ -286,7 +285,7 @@ describe('scanCodebase', () => {
   });
 
   it('resolves imports to actual source files with extensions', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     // strategies/workshop-v3/index.ts imports ./strategy which should resolve to strategy.ts
     const indexDeps = scan.fileDependencies.get(path.join('strategies', 'workshop-v3', 'index.ts'));
     assert.ok(indexDeps, 'index.ts should have dependencies');
@@ -299,14 +298,14 @@ describe('scanCodebase', () => {
 
 describe('formatInterview', () => {
   it('produces output with Directory Tree section', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('Directory Tree'));
     assert.ok(output.includes('workshop-v3/'));
   });
 
   it('produces output with Dependency Map section', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('Dependency Map'));
     // Should show file-level imports
@@ -315,7 +314,7 @@ describe('formatInterview', () => {
   });
 
   it('shows file-level import arrows in dependency map', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
     // orchestrator.ts imports utils.ts — should show as arrow
     assert.ok(output.includes('\u2192 utils.ts'));
@@ -323,7 +322,7 @@ describe('formatInterview', () => {
 
   it('shows clean directory labels when using subdirectory as baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir);
     const output = formatInterview(scan, subDir);
     assert.ok(output.includes('Directory Tree'));
     assert.ok(output.includes('workshop-v3/'));
@@ -332,7 +331,7 @@ describe('formatInterview', () => {
   });
 
   it('shows source files total count', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir);
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('source files total'));
   });
@@ -344,7 +343,7 @@ describe('CLI --skip is additive', () => {
   it('--skip merges with DEFAULT_SKIP_DIRS in interview mode', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--skip', '.nauvis', '--ext', '.ts,.js', '--base-dir', projectDir],
+      [cliPath, 'interview', '--skip', '.nauvis', '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     // The output should work fine — no crash from scanning node_modules etc.
@@ -388,7 +387,7 @@ const largeProjectDir = path.join(fixturesDir, 'large-project');
 
 describe('detectSuspiciousDirs', () => {
   it('flags directories with >= 50 files', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const suspicious = detectSuspiciousDirs(scan.directoryTree);
     assert.strictEqual(suspicious.length, 1);
     assert.strictEqual(suspicious[0].dir, 'vendor');
@@ -396,13 +395,13 @@ describe('detectSuspiciousDirs', () => {
   });
 
   it('does not flag directories below threshold', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const suspicious = detectSuspiciousDirs(scan.directoryTree);
     assert.ok(!suspicious.some((s) => s.dir === 'src'));
   });
 
   it('supports custom threshold', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const suspicious = detectSuspiciousDirs(scan.directoryTree, 5);
     assert.ok(suspicious.some((s) => s.dir === 'src'));
     assert.ok(suspicious.some((s) => s.dir === 'vendor'));
@@ -419,14 +418,14 @@ describe('detectSuspiciousDirs', () => {
 
 describe('filterScanResults', () => {
   it('removes excluded directories from directoryTree', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
     assert.ok(!filtered.directoryTree.has('vendor'));
     assert.ok(filtered.directoryTree.has('src'));
   });
 
   it('removes excluded files from sourceFiles', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
     assert.strictEqual(filtered.sourceFiles.length, 10);
     for (const f of filtered.sourceFiles) {
@@ -435,7 +434,7 @@ describe('filterScanResults', () => {
   });
 
   it('returns original scan when excludeDirs is empty', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir);
     const filtered = filterScanResults(scan, [], largeProjectDir);
     assert.strictEqual(filtered, scan);
   });
@@ -447,7 +446,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('auto-excludes vendor/ with warning', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('Excluded: vendor/'));
@@ -458,7 +457,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('--full disables auto-exclusion', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--full', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--full', '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(!output.includes('Excluded:'));
@@ -469,7 +468,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('auto-excluded dir does not appear in directory tree', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     // Strip ANSI codes for checking
@@ -483,122 +482,9 @@ describe('auto-exclusion in interview CLI', () => {
   it('source file count reflects only included files', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('10 source files total'));
-  });
-});
-
-describe('countExtensions', () => {
-  it('counts file extensions from file list', () => {
-    const files = ['/a/b.js', '/a/c.js', '/a/d.ts', '/a/e.json'];
-    const counts = countExtensions(files);
-    assert.strictEqual(counts.get('.js'), 2);
-    assert.strictEqual(counts.get('.ts'), 1);
-    assert.strictEqual(counts.get('.json'), 1);
-  });
-
-  it('sorts by count descending', () => {
-    const files = ['/a.ts', '/b.js', '/c.js', '/d.js'];
-    const counts = countExtensions(files);
-    const keys = [...counts.keys()];
-    assert.strictEqual(keys[0], '.js');
-    assert.strictEqual(keys[1], '.ts');
-  });
-
-  it('returns empty map for no files', () => {
-    const counts = countExtensions([]);
-    assert.strictEqual(counts.size, 0);
-  });
-});
-
-describe('scanCodebase without extensions', () => {
-  it('returns empty results when no extensions provided', () => {
-    const scan = scanCodebase(projectDir);
-    assert.strictEqual(scan.directoryTree.size, 0);
-    assert.strictEqual(scan.sourceFiles.length, 0);
-    assert.strictEqual(scan.fileDependencies.size, 0);
-    assert.strictEqual(scan.externalDeps.size, 0);
-  });
-});
-
-describe('language-aware interview CLI', () => {
-  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
-
-  it('shows extension summary and guidance when no --ext provided', () => {
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, 'interview', '--base-dir', projectDir],
-      { encoding: 'utf8' }
-    );
-    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok(plain.includes('Extensions found:'));
-    assert.ok(plain.includes('.ts'));
-    assert.ok(plain.includes('No extensions selected'));
-    assert.ok(plain.includes('--ext'));
-    // Should NOT contain Directory Tree (no scan happened)
-    assert.ok(!plain.includes('Directory Tree'));
-  });
-
-  it('shows extension summary before scan output when --ext provided', () => {
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
-      { encoding: 'utf8' }
-    );
-    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok(plain.includes('Extensions found:'));
-    assert.ok(plain.includes('Scanning: .ts'));
-    assert.ok(plain.includes('Directory Tree'));
-  });
-
-  it('warns when scanned files are less than 10% of total', () => {
-    // large-project has 70 .js files; scanning .ts would find 0 of 70
-    // We need a fixture where we scan a minority. The project fixture has .ts files.
-    // Let's scan large-project with a non-existent ext to get 0 of 70
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, 'interview', '--ext', '.xyz', '--base-dir', largeProjectDir],
-      { encoding: 'utf8' }
-    );
-    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok(plain.includes('Only scanning'));
-    assert.ok(plain.includes('Use --ext to include other extensions'));
-  });
-
-  it('--skip-ext excludes extensions from scan', () => {
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, 'interview', '--ext', '.ts,.js', '--skip-ext', '.js', '--base-dir', projectDir],
-      { encoding: 'utf8' }
-    );
-    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok(plain.includes('Scanning: .ts'));
-    assert.ok(!plain.includes('Scanning: .js'));
-    assert.ok(plain.includes('Directory Tree'));
-  });
-
-  it('help text shows import pattern examples for multiple languages', () => {
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, '--help'],
-      { encoding: 'utf8' }
-    );
-    assert.ok(output.includes('Go:'));
-    assert.ok(output.includes('Python:'));
-    assert.ok(output.includes('Rust:'));
-  });
-
-  it('examples command shows multi-language interview section', () => {
-    const output = execFileSync(
-      process.execPath,
-      [cliPath, 'examples'],
-      { encoding: 'utf8' }
-    );
-    assert.ok(output.includes('Multi-Language Interview'));
-    assert.ok(output.includes('--ext .go'));
-    assert.ok(output.includes('--ext .py'));
-    assert.ok(output.includes('--ext .rs'));
   });
 });

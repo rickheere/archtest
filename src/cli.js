@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
-  detectSuspiciousDirs, filterScanResults, walkDir, countExtensions,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
+  detectSuspiciousDirs, filterScanResults,
+  DEFAULT_EXTENSIONS, DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 } = require('./index');
 
 const dim = '\x1b[2m';
@@ -38,18 +38,12 @@ ${bold}Commands:${reset}
 
 ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --base-dir <path>        Set root directory for scanning ${dim}(default: cwd)${reset}
-  --ext <exts>             Comma-separated file extensions to scan ${dim}(required)${reset}
-                           ${dim}e.g. --ext .go  or  --ext .py,.pyi${reset}
-  --skip-ext <exts>        Comma-separated extensions to exclude from scan
+  --ext <exts>             Comma-separated file extensions to scan
+                           ${dim}(default: .js,.ts,.jsx,.tsx,.mjs,.cjs)${reset}
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Default: JS require/import patterns.${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
   --full                   Disable auto-exclusion of large directories
-
-${bold}Import Pattern Examples:${reset} ${dim}(for non-JS/TS projects)${reset}
-  ${cyan}Go:${reset}     --import-pattern '^\\s*"([^"]+)"'
-  ${cyan}Python:${reset} --import-pattern 'from\\s+(\\S+)\\s+import|import\\s+(\\S+)'
-  ${cyan}Rust:${reset}   --import-pattern 'use\\s+([\\w:]+)'
 
 ${yellow}AI-first architectural testing.${reset} Define boundaries in YAML, enforce
 them with grep-based pattern matching. Rules are designed to be
@@ -196,24 +190,6 @@ ${yellow}# Prevent accidental secrets in code${reset}
   deny:
     patterns:
       - "(api_key|apikey|secret_key|password)\\\\s*[=:]\\\\s*['\"][^'\\\"]{8,}"
-
-${bold}Multi-Language Interview${reset}
-${dim}${'─'.repeat(50)}${reset}
-archtest is language-agnostic. Use --ext and --import-pattern for any language:
-
-  ${cyan}Go:${reset}
-    archtest interview --ext .go --import-pattern '^\\s*"([^"]+)"'
-
-  ${cyan}Python:${reset}
-    archtest interview --ext .py,.pyi \\
-      --import-pattern 'from\\s+(\\S+)\\s+import' \\
-      --import-pattern 'import\\s+(\\S+)'
-
-  ${cyan}Rust:${reset}
-    archtest interview --ext .rs --import-pattern 'use\\s+([\\w:]+)'
-
-  ${cyan}Java:${reset}
-    archtest interview --ext .java --import-pattern 'import\\s+([\\w.]+)'
 `);
 }
 
@@ -270,12 +246,11 @@ rules:
 
 /**
  * Parse shared flags from args array.
- * Returns { skipDirs, skipFromCli, extensions, skipExtensions, importPatterns, remaining }
+ * Returns { skipDirs, skipFromCli, extensions, importPatterns, remaining }
  */
 function parseFlags(args) {
   let skipDirs = null;
   let extensions = null;
-  let skipExtensions = null;
   let baseDir = null;
   let full = false;
   const importPatterns = [];
@@ -287,9 +262,6 @@ function parseFlags(args) {
       i++;
     } else if (args[i] === '--ext' && args[i + 1]) {
       extensions = new Set(args[i + 1].split(',').map((s) => s.trim().startsWith('.') ? s.trim() : `.${s.trim()}`));
-      i++;
-    } else if (args[i] === '--skip-ext' && args[i + 1]) {
-      skipExtensions = new Set(args[i + 1].split(',').map((s) => s.trim().startsWith('.') ? s.trim() : `.${s.trim()}`));
       i++;
     } else if (args[i] === '--import-pattern' && args[i + 1]) {
       importPatterns.push(new RegExp(args[i + 1], 'g'));
@@ -307,8 +279,7 @@ function parseFlags(args) {
   return {
     skipDirs: skipDirs || DEFAULT_SKIP_DIRS,
     skipFromCli: skipDirs !== null,
-    extensions,
-    skipExtensions,
+    extensions: extensions || DEFAULT_EXTENSIONS,
     importPatterns: importPatterns.length > 0 ? importPatterns : DEFAULT_IMPORT_PATTERNS,
     baseDir,
     full,
@@ -318,44 +289,8 @@ function parseFlags(args) {
 
 function runInterview(flags) {
   const baseDir = flags.baseDir || process.cwd();
-
-  // Walk all files to count extensions (cheap — one directory walk)
-  const allFiles = walkDir(baseDir, flags.skipDirs);
-  const extCounts = countExtensions(allFiles);
-
-  // Apply --skip-ext filter if provided
-  let effectiveExtensions = flags.extensions;
-  if (effectiveExtensions && flags.skipExtensions) {
-    effectiveExtensions = new Set(
-      [...effectiveExtensions].filter((e) => !flags.skipExtensions.has(e))
-    );
-  }
-
-  // Always show extension summary
-  if (extCounts.size > 0) {
-    const summary = [...extCounts.entries()]
-      .map(([ext, count]) => `${ext} (${count})`)
-      .join(', ');
-    console.log(`${dim}Extensions found: ${summary}${reset}`);
-  } else {
-    console.log(`${dim}No files found in ${baseDir}${reset}`);
-  }
-
-  // If no --ext provided, show guidance and exit
-  if (!effectiveExtensions) {
-    console.log('');
-    const topExt = extCounts.size > 0 ? [...extCounts.keys()][0] : '.js';
-    console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext ${topExt}${reset} to scan ${topExt.slice(1).toUpperCase() || 'those'} files.`);
-    console.log('');
-    return;
-  }
-
-  if (effectiveExtensions.size > 0) {
-    console.log(`${dim}Scanning: ${[...effectiveExtensions].join(', ')}${reset}`);
-  }
-
   let scan = scanCodebase(baseDir, {
-    extensions: effectiveExtensions,
+    extensions: flags.extensions,
     importPatterns: flags.importPatterns,
     skipDirs: flags.skipDirs,
   });
@@ -369,13 +304,6 @@ function runInterview(flags) {
     }
   }
 
-  // Warn when scanned files < 10% of total source-like files
-  const totalSourceFiles = allFiles.length;
-  if (totalSourceFiles > 0 && scan.sourceFiles.length < totalSourceFiles * 0.1) {
-    console.log(`${yellow}Only scanning ${scan.sourceFiles.length} of ${totalSourceFiles} files. Use --ext to include other extensions.${reset}`);
-  }
-
-  console.log('');
   const output = formatInterview(scan, baseDir, { excludedDirs });
   console.log(output);
 }

@@ -222,20 +222,9 @@ function formatResults(results, { verbose = false, baseDir = process.cwd() } = {
 }
 
 /**
- * Count file extensions across all files.
- * Returns a Map of extension → count, sorted by count descending.
+ * Default source file extensions (JavaScript/TypeScript).
  */
-function countExtensions(allFiles) {
-  const counts = new Map();
-  for (const file of allFiles) {
-    const ext = path.extname(file);
-    if (ext) {
-      counts.set(ext, (counts.get(ext) || 0) + 1);
-    }
-  }
-  // Sort by count descending
-  return new Map([...counts.entries()].sort((a, b) => b[1] - a[1]));
-}
+const DEFAULT_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
 
 /**
  * Default import extraction patterns (JavaScript/TypeScript).
@@ -309,24 +298,13 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
  *
  * @param {string} baseDir - Root directory to scan
  * @param {Object} [options]
- * @param {Set<string>} [options.extensions] - File extensions to scan (required for results)
+ * @param {Set<string>} [options.extensions] - File extensions to scan (default: JS/TS)
  * @param {RegExp[]} [options.importPatterns] - Regexes to extract imports, group 1 = target (default: JS/TS)
  * @param {Set<string>} [options.skipDirs] - Directory names to skip (default: node_modules, .git)
  */
 function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
-  const ext = extensions;
+  const ext = extensions || DEFAULT_EXTENSIONS;
   const allFiles = walkDir(baseDir, skipDirs);
-
-  // No extensions specified — return empty scan
-  if (!ext || ext.size === 0) {
-    return {
-      directoryTree: new Map(),
-      sourceFiles: [],
-      fileDependencies: new Map(),
-      externalDeps: new Map(),
-    };
-  }
-
   const sourceFiles = allFiles.filter((f) => ext.has(path.extname(f)));
 
   // Build full directory tree: relDirPath → array of filenames (basenames)
@@ -653,6 +631,5 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
 module.exports = {
   parseRuleFile, resolveGlobs, checkFile, runRules, formatResults,
   scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults,
-  walkDir, countExtensions,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
+  DEFAULT_EXTENSIONS, DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 };
