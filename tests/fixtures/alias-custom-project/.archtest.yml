@@ -1,0 +1,7 @@
+scan:
+  extensions: [.ts]
+  aliases:
+    "@/": "src/"
+    "~/": "src/"
+
+rules: []

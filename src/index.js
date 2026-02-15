@@ -32,10 +32,32 @@ function parseRuleFile(filePath) {
     if (Array.isArray(doc.scan['skip-dirs'])) {
       scan.skipDirs = doc.scan['skip-dirs'];
     }
+    if (doc.scan.aliases !== undefined) {
+      if (doc.scan.aliases && typeof doc.scan.aliases === 'object' && !Array.isArray(doc.scan.aliases)) {
+        scan.aliases = {};
+        for (const [prefix, target] of Object.entries(doc.scan.aliases)) {
+          scan.aliases[String(prefix)] = String(target);
+        }
+      } else {
+        // Explicitly set to null/false/empty → disable aliases
+        scan.aliases = null;
+      }
+    }
     result.scan = scan;
   }
   return result;
 }
+
+/**
+ * Default path alias prefixes for JS/TS projects.
+ * Maps alias prefixes to target directories (relative to baseDir).
+ * Empty string means project root.
+ */
+const DEFAULT_ALIASES = {
+  '~/': '',
+  '@/': '',
+  '#': '',
+};
 
 /**
  * Default directories to skip during scanning.
@@ -320,6 +342,52 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
 }
 
 /**
+ * Resolve a path-alias import (e.g. @/components/Button, ~/lib/db) to a
+ * source file path relative to baseDir.
+ *
+ * Checks the import against a sorted list of alias prefixes (longest first).
+ * If matched, strips the prefix, prepends the alias target directory, and
+ * tries exact match → +extension → /index (same resolution as relative imports).
+ *
+ * @returns {string|null} Resolved relative path, or null if no alias matched.
+ */
+function resolveAliasImport(importStr, aliases, baseDir, extensions, sourceFileSet) {
+  // Sort prefixes longest-first to avoid partial matches
+  const prefixes = Object.keys(aliases).sort((a, b) => b.length - a.length);
+
+  for (const prefix of prefixes) {
+    if (!importStr.startsWith(prefix)) continue;
+
+    const stripped = importStr.slice(prefix.length);
+    const target = aliases[prefix];
+    const rel = target ? path.join(target, stripped) : stripped;
+
+    // Skip if it resolves outside baseDir
+    if (rel.startsWith('..')) return null;
+
+    // Try exact match
+    if (sourceFileSet.has(rel)) return rel;
+
+    // Try with each extension
+    for (const ext of extensions) {
+      const withExt = rel + ext;
+      if (sourceFileSet.has(withExt)) return withExt;
+    }
+
+    // Try as directory index
+    for (const ext of extensions) {
+      const indexFile = path.join(rel, `index${ext}`);
+      if (sourceFileSet.has(indexFile)) return indexFile;
+    }
+
+    // Alias matched but can't resolve to a known source file — return mapped path
+    return rel;
+  }
+
+  return null;
+}
+
+/**
  * Scan the codebase and build a complete file-level dependency map.
  * Returns { directoryTree, sourceFiles, fileDependencies }
  *
@@ -328,8 +396,9 @@ function resolveImportPath(importStr, importingFile, baseDir, extensions, source
  * @param {Set<string>} [options.extensions] - File extensions to scan (required for results)
  * @param {RegExp[]} [options.importPatterns] - Regexes to extract imports, group 1 = target (default: JS/TS)
  * @param {Set<string>} [options.skipDirs] - Directory names to skip (default: node_modules, .git)
+ * @param {Object|null} [options.aliases] - Path alias map { prefix: targetDir }. null disables aliases. Default: DEFAULT_ALIASES.
  */
-function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
+function scanCodebase(baseDir, { extensions, importPatterns, skipDirs, aliases } = {}) {
   const ext = extensions;
   const allFiles = walkDir(baseDir, skipDirs);
 
@@ -361,6 +430,9 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
 
   // Build file-level dependency map
   const fileDependencies = new Map();
+  // Resolve effective aliases: explicit null disables, undefined uses defaults
+  const effectiveAliases = aliases === null ? {} : (aliases || DEFAULT_ALIASES);
+  const hasAliases = Object.keys(effectiveAliases).length > 0;
 
   for (const file of sourceFiles) {
     const rel = path.relative(baseDir, file);
@@ -380,6 +452,26 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
           }
           if (!rawImports.some((r) => r.resolved === resolvedPath)) {
             rawImports.push({ raw: imp, resolved: resolvedPath });
+          }
+        }
+      } else if (hasAliases) {
+        // Try resolving as a path alias (e.g. @/components/Button, ~/lib/db)
+        const aliasResolved = resolveAliasImport(imp, effectiveAliases, baseDir, ext, sourceFileSet);
+        if (aliasResolved !== null) {
+          if (!all.includes(aliasResolved)) {
+            all.push(aliasResolved);
+            resolved.push(aliasResolved);
+          }
+          if (!rawImports.some((r) => r.resolved === aliasResolved)) {
+            rawImports.push({ raw: imp, resolved: aliasResolved });
+          }
+        } else {
+          // Not an alias — treat as external, include for interview visibility
+          if (!all.includes(imp)) {
+            all.push(imp);
+          }
+          if (!rawImports.some((r) => r.raw === imp)) {
+            rawImports.push({ raw: imp, resolved: imp });
           }
         }
       } else {
@@ -922,5 +1014,6 @@ module.exports = {
   getParentModule, getImportAnnotation,
   detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES,
+  resolveAliasImport,
+  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES,
 };

@@ -6,7 +6,7 @@ const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
   formatPaginatedInterview, detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
+  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES,
 } = require('./index');
 
 const dim = '\x1b[2m';
@@ -84,6 +84,10 @@ ${bold}scan:${reset}                            ${dim}# Optional. Persist interv
     - '^\\s*"([^"]+)"'            ${dim}# Capture group 1 = import target.${reset}
   ${bold}skip-dirs:${reset}                     ${dim}# Extra directories to skip during scanning.${reset}
     - vendor                     ${dim}# Adds to the default skip list.${reset}
+  ${bold}aliases:${reset}                       ${dim}# Path alias mappings (prefix → target dir).${reset}
+    "~/": ""                     ${dim}# ~/lib/db → lib/db (project root).${reset}
+    "@/": "src/"                 ${dim}# @/utils → src/utils.${reset}
+    ${dim}# Default: ~/ @/ # → project root. Set to false to disable.${reset}
 
 ${bold}skip:${reset}                            ${dim}# Optional. Array of directory names to skip.${reset}
   - .next                        ${dim}# Adds to the default skip list.${reset}
@@ -328,6 +332,9 @@ function runInit() {
 #   extensions: [.ts, .tsx, .js, .jsx]
 #   import-patterns: ['^\\s*"([^"]+)"']
 #   skip-dirs: [vendor]
+#   aliases:              # Path alias mappings (default: ~/ @/ # → project root)
+#     "@/": "src/"        # @/components/Button → src/components/Button
+#     "~/": ""            # ~/lib/db → lib/db
 
 # Extra directories to skip during scanning (adds to defaults).
 # Default: node_modules, .git, .next, dist, build, _generated, coverage, .turbo, .cache
@@ -528,6 +535,11 @@ function runInterview(flags) {
     }
   }
 
+  // Determine effective aliases: config scan.aliases overrides defaults, undefined uses defaults
+  const effectiveAliases = scanConfig && scanConfig.aliases !== undefined
+    ? scanConfig.aliases
+    : undefined; // let scanCodebase use DEFAULT_ALIASES
+
   // Walk all files to count extensions (cheap — one directory walk)
   const allFiles = walkDir(baseDir, effectiveSkipDirs);
   const extCounts = countExtensions(allFiles);
@@ -597,6 +609,7 @@ function runInterview(flags) {
     extensions: effectiveExtensions,
     importPatterns: effectiveImportPatterns,
     skipDirs: effectiveSkipDirs,
+    aliases: effectiveAliases,
   });
 
   let excludedDirs = [];

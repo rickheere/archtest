@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -1516,5 +1516,207 @@ describe('paginated interview CLI', () => {
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('--page'));
+  });
+});
+
+// ─── Path alias resolution ──────────────────────────────────────────
+
+const aliasProjectDir = path.join(fixturesDir, 'alias-project');
+const aliasCustomProjectDir = path.join(fixturesDir, 'alias-custom-project');
+
+describe('DEFAULT_ALIASES', () => {
+  it('includes ~/, @/, and # prefixes', () => {
+    assert.ok('~/' in DEFAULT_ALIASES);
+    assert.ok('@/' in DEFAULT_ALIASES);
+    assert.ok('#' in DEFAULT_ALIASES);
+  });
+
+  it('maps all defaults to project root (empty string)', () => {
+    for (const target of Object.values(DEFAULT_ALIASES)) {
+      assert.strictEqual(target, '');
+    }
+  });
+});
+
+describe('resolveAliasImport', () => {
+  const extensions = new Set(['.ts', '.js']);
+  const sourceFileSet = new Set([
+    'components/Layout.ts',
+    'lib/db.ts',
+    'config.ts',
+    'app.ts',
+  ]);
+
+  it('resolves ~/ alias to project root', () => {
+    const result = resolveAliasImport('~/lib/db', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, 'lib/db.ts');
+  });
+
+  it('resolves @/ alias to project root', () => {
+    const result = resolveAliasImport('@/config', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, 'config.ts');
+  });
+
+  it('resolves # alias to project root', () => {
+    const result = resolveAliasImport('#config', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, 'config.ts');
+  });
+
+  it('resolves alias to directory index file', () => {
+    const setWithIndex = new Set([...sourceFileSet, 'lib/index.ts']);
+    const result = resolveAliasImport('~/lib', DEFAULT_ALIASES, '/base', extensions, setWithIndex);
+    assert.strictEqual(result, 'lib/index.ts');
+  });
+
+  it('returns null for non-alias imports', () => {
+    const result = resolveAliasImport('react', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, null);
+  });
+
+  it('returns null for relative imports', () => {
+    const result = resolveAliasImport('./utils', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, null);
+  });
+
+  it('uses custom aliases when provided', () => {
+    const customAliases = { '@/': 'src/' };
+    const customSet = new Set(['src/components/Button.ts']);
+    const result = resolveAliasImport('@/components/Button', customAliases, '/base', extensions, customSet);
+    assert.strictEqual(result, 'src/components/Button.ts');
+  });
+
+  it('prefers longest matching prefix', () => {
+    const aliases = { '#': '', '#imports/': 'auto-imports/' };
+    const fileSet = new Set(['auto-imports/foo.ts', 'imports/foo.ts']);
+    const result = resolveAliasImport('#imports/foo', aliases, '/base', extensions, fileSet);
+    assert.strictEqual(result, 'auto-imports/foo.ts');
+  });
+
+  it('returns mapped path when file not found', () => {
+    const result = resolveAliasImport('~/nonexistent/file', DEFAULT_ALIASES, '/base', extensions, sourceFileSet);
+    assert.strictEqual(result, 'nonexistent/file');
+  });
+});
+
+describe('scanCodebase with aliases', () => {
+  it('resolves alias imports as internal dependencies with default aliases', () => {
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
+    assert.ok(layoutDeps, 'components/Layout.ts should have dependencies');
+    // ~/lib/db should resolve to lib/db.ts
+    assert.ok(
+      layoutDeps.resolved.some((d) => d === 'lib/db.ts'),
+      `Expected lib/db.ts in resolved, got: ${JSON.stringify(layoutDeps.resolved)}`
+    );
+    // @/config should resolve to config.ts
+    assert.ok(
+      layoutDeps.resolved.some((d) => d === 'config.ts'),
+      `Expected config.ts in resolved, got: ${JSON.stringify(layoutDeps.resolved)}`
+    );
+  });
+
+  it('tracks rawImports for alias imports', () => {
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
+    assert.ok(layoutDeps.rawImports.length >= 2, 'Should have rawImports for alias imports');
+    assert.ok(
+      layoutDeps.rawImports.some((r) => r.raw === '~/lib/db' && r.resolved === 'lib/db.ts'),
+      `Expected ~/lib/db → lib/db.ts in rawImports, got: ${JSON.stringify(layoutDeps.rawImports)}`
+    );
+    assert.ok(
+      layoutDeps.rawImports.some((r) => r.raw === '@/config' && r.resolved === 'config.ts'),
+      `Expected @/config → config.ts in rawImports, got: ${JSON.stringify(layoutDeps.rawImports)}`
+    );
+  });
+
+  it('resolves # alias imports', () => {
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const dbDeps = scan.fileDependencies.get(path.join('lib', 'db.ts'));
+    assert.ok(dbDeps, 'lib/db.ts should have dependencies');
+    assert.ok(
+      dbDeps.resolved.some((d) => d === 'config.ts'),
+      `Expected config.ts in resolved for #config, got: ${JSON.stringify(dbDeps.resolved)}`
+    );
+  });
+
+  it('treats non-alias bare imports as external', () => {
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const appDeps = scan.fileDependencies.get('app.ts');
+    assert.ok(appDeps, 'app.ts should have dependencies');
+    // 'react' should be in all but NOT in resolved
+    assert.ok(
+      appDeps.all.includes('react'),
+      'react should be in all dependencies'
+    );
+    assert.ok(
+      !appDeps.resolved.includes('react'),
+      'react should not be in resolved dependencies'
+    );
+  });
+
+  it('disables aliases when set to null', () => {
+    const scan = scanCodebase(aliasProjectDir, {
+      extensions: new Set(['.ts']),
+      aliases: null,
+    });
+    const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
+    assert.ok(layoutDeps, 'components/Layout.ts should have dependencies');
+    // With aliases disabled, ~/lib/db should be treated as external
+    assert.ok(
+      layoutDeps.all.includes('~/lib/db'),
+      'Without aliases, ~/lib/db should be kept as-is in all'
+    );
+    assert.ok(
+      !layoutDeps.resolved.some((d) => d === 'lib/db.ts'),
+      'Without aliases, ~/lib/db should not be resolved'
+    );
+  });
+
+  it('uses custom aliases from options', () => {
+    const scan = scanCodebase(aliasCustomProjectDir, {
+      extensions: new Set(['.ts']),
+      aliases: { '@/': 'src/', '~/': 'src/' },
+    });
+    const buttonDeps = scan.fileDependencies.get(path.join('src', 'components', 'Button.ts'));
+    assert.ok(buttonDeps, 'src/components/Button.ts should have dependencies');
+    assert.ok(
+      buttonDeps.resolved.some((d) => d === path.join('src', 'lib', 'utils.ts')),
+      `Expected src/lib/utils.ts in resolved, got: ${JSON.stringify(buttonDeps.resolved)}`
+    );
+  });
+});
+
+describe('parseRuleFile with aliases', () => {
+  it('parses scan.aliases from config', () => {
+    const config = parseRuleFile(path.join(aliasCustomProjectDir, '.archtest.yml'));
+    assert.ok(config.scan, 'Should have scan config');
+    assert.deepStrictEqual(config.scan.aliases, { '@/': 'src/', '~/': 'src/' });
+  });
+});
+
+describe('interview with aliases (CLI)', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('shows alias-resolved imports in interview output', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', aliasProjectDir, '--full'],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // Resolved alias imports should show in dependency map
+    assert.ok(plain.includes('lib/db.ts') || plain.includes('lib' + path.sep + 'db.ts'),
+      'Interview should show resolved lib/db.ts');
+    assert.ok(plain.includes('config.ts'),
+      'Interview should show resolved config.ts');
+  });
+
+  it('schema documents aliases', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'schema'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('aliases'));
   });
 });
