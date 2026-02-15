@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
-  detectSuspiciousDirs, filterScanResults, walkDir, countExtensions,
-  detectLanguageFamilies, extensionsByTopDir,
+  formatPaginatedInterview, detectSuspiciousDirs, filterScanResults,
+  walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
   DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS,
 } = require('./index');
 
@@ -50,6 +50,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
                            ${dim}Can also be set in .archtest.yml scan.skip-dirs${reset}
   --full                   Disable auto-exclusion of large directories
+  --page <n>               Show page N of the paginated interview ${dim}(default: 1)${reset}
 
 ${bold}Scan Config:${reset} ${dim}Persist scan settings in .archtest.yml so they apply automatically.${reset}
   CLI --ext overrides config. CLI --import-pattern adds to config patterns.
@@ -382,6 +383,7 @@ function parseFlags(args) {
   let skipExtensions = null;
   let baseDir = null;
   let full = false;
+  let page = null;
   const importPatterns = [];
   const remaining = [];
 
@@ -403,6 +405,9 @@ function parseFlags(args) {
       i++;
     } else if (args[i] === '--full') {
       full = true;
+    } else if (args[i] === '--page' && args[i + 1]) {
+      page = parseInt(args[i + 1], 10);
+      i++;
     } else {
       remaining.push(args[i]);
     }
@@ -417,6 +422,7 @@ function parseFlags(args) {
     importPatternsFromCli: importPatterns.length > 0,
     baseDir,
     full,
+    page,
     remaining,
   };
 }
@@ -609,8 +615,14 @@ function runInterview(flags) {
   }
 
   console.log('');
-  const output = formatInterview(scan, baseDir, { excludedDirs });
-  console.log(output);
+  if (flags.full) {
+    const output = formatInterview(scan, baseDir, { excludedDirs });
+    console.log(output);
+  } else {
+    const page = flags.page || 1;
+    const output = formatPaginatedInterview(scan, baseDir, page, { excludedDirs });
+    console.log(output);
+  }
 }
 
 function main() {

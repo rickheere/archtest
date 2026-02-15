@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES } = require('../src/index');
+const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES } = require('../src/index');
 
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
@@ -968,5 +968,318 @@ describe('documentation updates', () => {
     assert.ok(output.includes('backend/.archtest.yml'));
     assert.ok(output.includes('mobile/.archtest.yml'));
     assert.ok(output.includes('--base-dir backend/'));
+  });
+});
+
+describe('getParentModule', () => {
+  it('returns null for root directory', () => {
+    assert.strictEqual(getParentModule('.'), null);
+  });
+
+  it('returns the directory itself for top-level dirs', () => {
+    assert.strictEqual(getParentModule('lib'), 'lib');
+  });
+
+  it('returns parent directory for nested dirs', () => {
+    assert.strictEqual(getParentModule(path.join('lib', 'jobs')), 'lib');
+  });
+
+  it('returns grandparent path for deeply nested dirs', () => {
+    assert.strictEqual(
+      getParentModule(path.join('packages', 'api', 'src')),
+      path.join('packages', 'api')
+    );
+  });
+});
+
+describe('getImportAnnotation', () => {
+  it('returns null when parentModule is null', () => {
+    assert.strictEqual(getImportAnnotation('utils.ts', '.', null), null);
+  });
+
+  it('returns "(label/)" for import within parent module', () => {
+    const annotation = getImportAnnotation(
+      path.join('lib', 'db', 'payment.js'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(annotation, '(lib/)');
+  });
+
+  it('returns "← leaves label/" for import outside parent module', () => {
+    const annotation = getImportAnnotation(
+      path.join('apiHandlers', 'order.js'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(annotation, '\u2190 leaves lib/');
+  });
+
+  it('handles top-level parent module correctly', () => {
+    const annotation = getImportAnnotation(
+      path.join('other', 'file.js'),
+      'lib',
+      'lib'
+    );
+    assert.strictEqual(annotation, '\u2190 leaves lib/');
+  });
+
+  it('treats same parent module sibling as internal', () => {
+    const annotation = getImportAnnotation(
+      path.join('lib', 'utils', 'helper.js'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(annotation, '(lib/)');
+  });
+});
+
+describe('formatPaginatedInterview', () => {
+  // Build a scan object with cross-directory imports for testing
+  function buildTestScan() {
+    return {
+      directoryTree: new Map([
+        ['.', ['app.ts']],
+        ['lib', ['index.ts']],
+        [path.join('lib', 'jobs'), ['payment.ts', 'reminders.ts']],
+        [path.join('lib', 'db'), ['payment.js', 'user.js']],
+        ['apiHandlers', ['order.ts']],
+      ]),
+      sourceFiles: [
+        '/fake/app.ts',
+        '/fake/lib/index.ts',
+        '/fake/lib/jobs/payment.ts',
+        '/fake/lib/jobs/reminders.ts',
+        '/fake/lib/db/payment.js',
+        '/fake/lib/db/user.js',
+        '/fake/apiHandlers/order.ts',
+      ],
+      fileDependencies: new Map([
+        [path.join('lib', 'jobs', 'payment.ts'), {
+          all: [path.join('lib', 'db', 'payment.js'), path.join('apiHandlers', 'order.ts')],
+          resolved: [path.join('lib', 'db', 'payment.js'), path.join('apiHandlers', 'order.ts')],
+          rawImports: [
+            { raw: '../db/payment.js', resolved: path.join('lib', 'db', 'payment.js') },
+            { raw: '../../apiHandlers/order', resolved: path.join('apiHandlers', 'order.ts') },
+          ],
+        }],
+        [path.join('lib', 'jobs', 'reminders.ts'), {
+          all: [path.join('lib', 'db', 'user.js')],
+          resolved: [path.join('lib', 'db', 'user.js')],
+          rawImports: [
+            { raw: '../db/user.js', resolved: path.join('lib', 'db', 'user.js') },
+          ],
+        }],
+      ]),
+    };
+  }
+
+  it('page 1 shows directory tree overview', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 1);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (1/'));
+    assert.ok(plain.includes('Directory Tree'));
+    assert.ok(plain.includes('7 source files total'));
+  });
+
+  it('page 1 shows all directories in tree', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 1);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('lib/'));
+    assert.ok(plain.includes('jobs/'));
+    assert.ok(plain.includes('db/'));
+    assert.ok(plain.includes('apiHandlers/'));
+  });
+
+  it('page 1 footer tells AI to ask about modules', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 1);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Ask the developer about these modules'));
+    assert.ok(plain.includes('--page 2'));
+  });
+
+  it('directory page shows file count', () => {
+    const scan = buildTestScan();
+    // lib/jobs is at page index: root(page2) + lib(page3) + lib/db(page4) + lib/jobs(page5)
+    // Actually: orderedDirs = ['.', 'apiHandlers', 'lib', 'lib/db', 'lib/jobs']
+    // page 2 = '.', page 3 = 'apiHandlers', page 4 = 'lib', page 5 = 'lib/db', page 6 = 'lib/jobs'
+    const output = formatPaginatedInterview(scan, '/fake', 6);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('(2 files)'));
+  });
+
+  it('shows cross-directory imports with annotations', () => {
+    const scan = buildTestScan();
+    // lib/jobs page: orderedDirs sorted = ['.', 'apiHandlers', 'lib', 'lib/db', 'lib/jobs']
+    // page 6 = lib/jobs
+    const output = formatPaginatedInterview(scan, '/fake', 6);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    // payment.ts imports ../db/payment.js (within lib/) and ../../apiHandlers/order (leaves lib/)
+    assert.ok(plain.includes('../db/payment.js'));
+    assert.ok(plain.includes('(lib/)'));
+    assert.ok(plain.includes('../../apiHandlers/order'));
+    assert.ok(plain.includes('leaves lib/'));
+  });
+
+  it('shows "no outgoing imports" for directories without cross-dir imports', () => {
+    const scan = buildTestScan();
+    // page 2 = root '.', which has app.ts with no deps
+    const output = formatPaginatedInterview(scan, '/fake', 2);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No outgoing imports'));
+  });
+
+  it('footer tells AI to ask about imports on directory pages', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 3);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Ask the developer about these imports'));
+  });
+
+  it('last page shows interview complete message', () => {
+    const scan = buildTestScan();
+    const totalPages = 1 + 5; // 1 tree page + 5 directories
+    const output = formatPaginatedInterview(scan, '/fake', totalPages);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Interview complete'));
+  });
+
+  it('returns error for out of range page', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 99);
+    assert.ok(output.includes('out of range'));
+  });
+
+  it('returns error for page 0', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 0);
+    assert.ok(output.includes('out of range'));
+  });
+
+  it('page 1 shows excluded dirs warning when provided', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 1, {
+      excludedDirs: [{ dir: 'vendor', count: 60 }],
+    });
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Excluded: vendor/'));
+    assert.ok(plain.includes('60 files'));
+  });
+
+  it('shows page numbers in header', () => {
+    const scan = buildTestScan();
+    const output = formatPaginatedInterview(scan, '/fake', 3);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (3/6)'));
+  });
+
+  it('dims files with no outgoing imports', () => {
+    const scan = buildTestScan();
+    // lib/db page (page 5): has payment.js and user.js but neither has deps
+    const output = formatPaginatedInterview(scan, '/fake', 5);
+    // Files should appear but dimmed (ANSI dim code \x1b[2m)
+    assert.ok(output.includes('payment.js'));
+    assert.ok(output.includes('user.js'));
+  });
+});
+
+describe('formatPaginatedInterview with project fixture', () => {
+  it('produces valid paginated output from real scan', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 1);
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (1/'));
+    assert.ok(plain.includes('Directory Tree'));
+    assert.ok(plain.includes('source files total'));
+  });
+
+  it('all pages are accessible without errors', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    // Determine total pages from page 1 output
+    const page1 = formatPaginatedInterview(scan, projectDir, 1);
+    const match = page1.match(/INTERVIEW \(1\/(\d+)\)/);
+    assert.ok(match, 'Should have page count in header');
+    const totalPages = parseInt(match[1], 10);
+    assert.ok(totalPages >= 2, 'Should have at least 2 pages');
+
+    for (let i = 1; i <= totalPages; i++) {
+      const output = formatPaginatedInterview(scan, projectDir, i);
+      assert.ok(output.length > 0, `Page ${i} should produce output`);
+      assert.ok(output.includes(`INTERVIEW (${i}/${totalPages})`));
+    }
+  });
+});
+
+describe('scanCodebase rawImports tracking', () => {
+  it('tracks rawImports for resolved relative imports', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps, 'orchestrator.ts should have deps');
+    assert.ok(Array.isArray(deps.rawImports), 'Should have rawImports array');
+    assert.ok(deps.rawImports.length > 0, 'Should have at least one rawImport');
+    // Check structure
+    for (const imp of deps.rawImports) {
+      assert.ok(imp.raw, 'rawImport should have raw property');
+      assert.ok(imp.resolved, 'rawImport should have resolved property');
+    }
+  });
+
+  it('rawImports contains the original import string', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    // orchestrator.ts imports './utils' which resolves to 'utils.ts'
+    const utilsImport = deps.rawImports.find((i) => i.resolved === 'utils.ts');
+    assert.ok(utilsImport, 'Should have rawImport for utils.ts');
+    assert.strictEqual(utilsImport.raw, './utils');
+  });
+});
+
+describe('paginated interview CLI', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('default interview output is paginated (page 1)', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts,.js', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (1/'));
+    assert.ok(plain.includes('Directory Tree'));
+    assert.ok(plain.includes('--page 2'));
+  });
+
+  it('--page navigates to a specific page', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts,.js', '--base-dir', projectDir, '--page', '2'],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (2/'));
+  });
+
+  it('--full gives the old non-paginated output', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--full', '--ext', '.ts,.js', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Dependency Map'));
+    assert.ok(plain.includes('Interview Guide'));
+    assert.ok(!plain.includes('INTERVIEW (1/'));
+  });
+
+  it('help text documents --page flag', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('--page'));
   });
 });

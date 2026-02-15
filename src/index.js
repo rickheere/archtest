@@ -367,13 +367,19 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
     const imports = extractImports(file, importPatterns);
     const all = [];
     const resolved = []; // resolved relative imports for cross-directory analysis
+    const rawImports = []; // raw import string → resolved path mapping
 
     for (const imp of imports) {
       if (imp.startsWith('.')) {
         const resolvedPath = resolveImportPath(imp, file, baseDir, ext, sourceFileSet);
-        if (resolvedPath && !all.includes(resolvedPath)) {
-          all.push(resolvedPath);
-          resolved.push(resolvedPath);
+        if (resolvedPath) {
+          if (!all.includes(resolvedPath)) {
+            all.push(resolvedPath);
+            resolved.push(resolvedPath);
+          }
+          if (!rawImports.some((r) => r.resolved === resolvedPath)) {
+            rawImports.push({ raw: imp, resolved: resolvedPath });
+          }
         }
       } else {
         if (!all.includes(imp)) {
@@ -383,7 +389,7 @@ function scanCodebase(baseDir, { extensions, importPatterns, skipDirs } = {}) {
     }
 
     if (all.length > 0) {
-      fileDependencies.set(rel, { all, resolved });
+      fileDependencies.set(rel, { all, resolved, rawImports });
     }
   }
 
@@ -623,6 +629,204 @@ function formatInterview(scan, baseDir, { excludedDirs } = {}) {
 }
 
 /**
+ * Determine the "parent module" directory for annotation purposes.
+ * For a file in lib/jobs/, the parent module is lib/ (grandparent of the file).
+ * For a file in lib/, the parent module is lib/ itself.
+ * For a file at root, returns null (no annotation).
+ */
+function getParentModule(dirPath) {
+  if (dirPath === '.') return null;
+  const parts = dirPath.split(path.sep);
+  if (parts.length >= 2) {
+    return parts.slice(0, -1).join(path.sep);
+  }
+  return dirPath;
+}
+
+/**
+ * Determine the annotation for an import based on whether it stays within
+ * or leaves the parent module.
+ *
+ * Returns "(label/)" for imports within the parent module,
+ * "← leaves label/" for imports outside, or null for no annotation.
+ */
+function getImportAnnotation(resolvedTarget, fileDir, parentModule) {
+  if (!parentModule) return null;
+
+  const targetDir = path.dirname(resolvedTarget);
+
+  // Within parent module?
+  const isInParentModule = targetDir === parentModule ||
+    resolvedTarget.startsWith(parentModule + path.sep);
+
+  const label = path.basename(parentModule);
+
+  if (isInParentModule) {
+    return `(${label}/)`;
+  }
+  return `\u2190 leaves ${label}/`;
+}
+
+/**
+ * Format a paginated interview report, showing one directory at a time.
+ * Page 1: compact directory tree overview.
+ * Pages 2+: one directory per page with file imports and boundary annotations.
+ *
+ * @param {Object} scan - The scan result from scanCodebase
+ * @param {string} baseDir - The base directory used for scanning
+ * @param {number} page - 1-indexed page number
+ * @param {Object} [options]
+ * @param {{ dir: string, count: number }[]} [options.excludedDirs] - Auto-excluded directories
+ */
+function formatPaginatedInterview(scan, baseDir, page, { excludedDirs } = {}) {
+  const dim = '\x1b[2m';
+  const bold = '\x1b[1m';
+  const cyan = '\x1b[36m';
+  const yellow = '\x1b[33m';
+  const reset = '\x1b[0m';
+
+  const lines = [];
+
+  // Build ordered list of directories (depth-first alphabetical)
+  const orderedDirs = [];
+  if (scan.directoryTree.has('.')) orderedDirs.push('.');
+  const sortedDirs = [...scan.directoryTree.keys()].filter((d) => d !== '.').sort();
+  orderedDirs.push(...sortedDirs);
+
+  const totalPages = 1 + orderedDirs.length;
+
+  if (page < 1 || page > totalPages) {
+    return `Page ${page} is out of range. Valid pages: 1\u2013${totalPages}.`;
+  }
+
+  // Header framing
+  lines.push(`${bold}\u2500\u2500 INTERVIEW (${page}/${totalPages}) \u2014 Discuss with the developer \u2500\u2500${reset}`);
+  lines.push('');
+
+  if (page === 1) {
+    // PAGE 1: Directory tree overview
+
+    // Auto-exclusion warnings
+    if (excludedDirs && excludedDirs.length > 0) {
+      for (const { dir, count } of excludedDirs) {
+        lines.push(`${yellow}Excluded: ${dir}/ (${count} files) \u2014 unusually large, likely build output${reset}`);
+      }
+      lines.push(`${dim}Add to skip list or use --full to include.${reset}`);
+      lines.push('');
+    }
+
+    lines.push(`${bold}Directory Tree${reset}`);
+    lines.push('');
+
+    // Collect all directory paths including intermediate parents
+    const allDirPaths = new Set();
+    for (const dir of scan.directoryTree.keys()) {
+      if (dir === '.') continue;
+      const parts = dir.split(path.sep);
+      for (let i = 1; i <= parts.length; i++) {
+        allDirPaths.add(parts.slice(0, i).join(path.sep));
+      }
+    }
+    const sortedTreeDirs = [...allDirPaths].sort();
+
+    // Show root files
+    if (scan.directoryTree.has('.')) {
+      const count = scan.directoryTree.get('.').length;
+      lines.push(`  ${dim}(root)${reset}${' '.repeat(22)}${dim}${count} file${count === 1 ? '' : 's'}${reset}`);
+    }
+
+    // Show directory tree with indentation
+    for (const dir of sortedTreeDirs) {
+      const depth = dir.split(path.sep).length;
+      const indent = '  ' + '  '.repeat(depth);
+      const dirName = path.basename(dir) + '/';
+      const fileCount = scan.directoryTree.has(dir) ? scan.directoryTree.get(dir).length : 0;
+      if (fileCount > 0) {
+        const padding = Math.max(1, 28 - indent.length - dirName.length);
+        lines.push(`${indent}${cyan}${dirName}${reset}${' '.repeat(padding)}${dim}${fileCount} file${fileCount === 1 ? '' : 's'}${reset}`);
+      } else {
+        lines.push(`${indent}${cyan}${dirName}${reset}`);
+      }
+    }
+
+    lines.push('');
+    lines.push(`  ${dim}${scan.sourceFiles.length} source files total${reset}`);
+
+  } else {
+    // PAGES 2+: Directory detail
+    const dirIndex = page - 2;
+    const dir = orderedDirs[dirIndex];
+    const files = (scan.directoryTree.get(dir) || []).slice().sort();
+    const dirLabel = dir === '.' ? '(root)' : dir + '/';
+
+    lines.push(`\ud83d\udcc1 ${bold}${dirLabel}${reset}  ${dim}(${files.length} file${files.length === 1 ? '' : 's'})${reset}`);
+    lines.push('');
+
+    // Get parent module for annotation
+    const parentModule = getParentModule(dir);
+
+    let hasOutgoingImports = false;
+
+    for (const fileName of files) {
+      const filePath = dir === '.' ? fileName : path.join(dir, fileName);
+      const deps = scan.fileDependencies.get(filePath);
+
+      if (!deps || !deps.rawImports || deps.rawImports.length === 0) {
+        lines.push(`  ${dim}${fileName}${reset}`);
+        continue;
+      }
+
+      // Filter to only cross-directory imports (leave the current directory)
+      const outgoingImports = deps.rawImports.filter((imp) => {
+        const targetDir = path.dirname(imp.resolved);
+        // Same directory = internal, skip
+        if (targetDir === dir) return false;
+        // Subdirectory of current dir = internal, skip
+        if (dir !== '.' && imp.resolved.startsWith(dir + path.sep)) return false;
+        return true;
+      });
+
+      if (outgoingImports.length === 0) {
+        lines.push(`  ${dim}${fileName}${reset}`);
+        continue;
+      }
+
+      hasOutgoingImports = true;
+      lines.push(`  ${fileName}`);
+
+      for (const imp of outgoingImports) {
+        const annotation = getImportAnnotation(imp.resolved, dir, parentModule);
+        if (annotation) {
+          const padding = Math.max(1, 28 - imp.raw.length);
+          lines.push(`    \u2192 ${imp.raw}${' '.repeat(padding)}${annotation}`);
+        } else {
+          lines.push(`    \u2192 ${imp.raw}`);
+        }
+      }
+      lines.push('');
+    }
+
+    if (!hasOutgoingImports) {
+      lines.push(`  ${dim}No outgoing imports from this directory.${reset}`);
+    }
+  }
+
+  lines.push('');
+
+  // Footer framing
+  if (page < totalPages) {
+    const askText = page === 1
+      ? 'Ask the developer about these modules.'
+      : 'Ask the developer about these imports.';
+    lines.push(`${bold}\u2500\u2500 ${askText} Run --page ${page + 1} to continue \u2500\u2500${reset}`);
+  } else {
+    lines.push(`${bold}\u2500\u2500 Interview complete. Run ${cyan}archtest schema${reset}${bold} for next steps \u2500\u2500${reset}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Map file extensions to language families for multi-language detection.
  */
 const LANGUAGE_FAMILIES = {
@@ -709,7 +913,9 @@ function extensionsByTopDir(allFiles, baseDir) {
 
 module.exports = {
   parseRuleFile, resolveGlobs, checkFile, runRules, formatResults,
-  scanCodebase, formatInterview, detectSuspiciousDirs, filterScanResults,
+  scanCodebase, formatInterview, formatPaginatedInterview,
+  getParentModule, getImportAnnotation,
+  detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
   DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, LANGUAGE_FAMILIES,
 };
