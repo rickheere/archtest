@@ -1,5 +1,5 @@
 {
-  "name": "archtest",
+  "name": "@rickheere/archtest",
   "version": "1.0.0",
   "description": "Architectural drift detection through declarative rules",
   "main": "src/index.js",
