@@ -936,6 +936,204 @@ describe('multi-language scoping hint', () => {
   });
 });
 
+describe('getParentModule', () => {
+  it('returns null for root directory', () => {
+    assert.strictEqual(getParentModule('.'), null);
+  });
+
+  it('returns the directory itself for single-level paths', () => {
+    assert.strictEqual(getParentModule('lib'), 'lib');
+  });
+
+  it('returns grandparent for two-level paths', () => {
+    assert.strictEqual(getParentModule(path.join('lib', 'jobs')), 'lib');
+  });
+
+  it('returns parent for three-level paths', () => {
+    const result = getParentModule(path.join('packages', 'api', 'src'));
+    assert.strictEqual(result, path.join('packages', 'api'));
+  });
+});
+
+describe('getImportAnnotation', () => {
+  it('returns null when parentModule is null', () => {
+    assert.strictEqual(getImportAnnotation('foo.ts', '.', null), null);
+  });
+
+  it('returns "(label/)" for imports within parent module', () => {
+    const result = getImportAnnotation(
+      path.join('lib', 'db', 'user.ts'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(result, '(lib/)');
+  });
+
+  it('returns "← leaves label/" for imports outside parent module', () => {
+    const result = getImportAnnotation(
+      path.join('apiHandlers', 'order', 'index.ts'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(result, '\u2190 leaves lib/');
+  });
+
+  it('treats imports to parent module directory itself as within', () => {
+    const result = getImportAnnotation(
+      path.join('lib', 'utils.ts'),
+      path.join('lib', 'jobs'),
+      'lib'
+    );
+    assert.strictEqual(result, '(lib/)');
+  });
+});
+
+describe('scanCodebase rawImports', () => {
+  it('includes rawImports with raw and resolved paths', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    assert.ok(deps, 'orchestrator.ts should have deps');
+    assert.ok(Array.isArray(deps.rawImports), 'should have rawImports array');
+    assert.ok(deps.rawImports.length > 0, 'should have at least one rawImport');
+    for (const imp of deps.rawImports) {
+      assert.ok(imp.raw, 'rawImport should have raw');
+      assert.ok(imp.resolved, 'rawImport should have resolved');
+    }
+  });
+
+  it('preserves the raw import string from source code', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const deps = scan.fileDependencies.get('orchestrator.ts');
+    const utilsImport = deps.rawImports.find((r) => r.resolved === 'utils.ts');
+    assert.ok(utilsImport, 'Should have rawImport for utils.ts');
+    assert.strictEqual(utilsImport.raw, './utils');
+  });
+});
+
+describe('formatPaginatedInterview', () => {
+  it('page 1 shows directory tree', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 1);
+    assert.ok(output.includes('INTERVIEW (1/'));
+    assert.ok(output.includes('Directory Tree'));
+    assert.ok(output.includes('source files total'));
+  });
+
+  it('page 1 shows page count', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 1);
+    assert.ok(/INTERVIEW \(1\/\d+\)/.test(output));
+  });
+
+  it('page 2 shows first directory detail', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 2);
+    assert.ok(output.includes('INTERVIEW (2/'));
+    assert.ok(/\d+ files?\)/.test(output));
+  });
+
+  it('last page shows interview complete', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const dirCount = scan.directoryTree.size;
+    const totalPages = 1 + dirCount;
+    const output = formatPaginatedInterview(scan, projectDir, totalPages);
+    assert.ok(output.includes('Interview complete'));
+  });
+
+  it('returns error for out-of-range page', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 999);
+    assert.ok(output.includes('out of range'));
+  });
+
+  it('shows excluded dirs warning on page 1', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const excludedDirs = [{ dir: 'vendor', count: 60 }];
+    const output = formatPaginatedInterview(scan, projectDir, 1, { excludedDirs });
+    assert.ok(output.includes('Excluded: vendor/'));
+    assert.ok(output.includes('60 files'));
+  });
+
+  it('footer tells AI to continue with --page N+1', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 1);
+    assert.ok(output.includes('--page 2'));
+  });
+
+  it('header frames the interview for the AI', () => {
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const output = formatPaginatedInterview(scan, projectDir, 1);
+    assert.ok(output.includes('Discuss with the developer'));
+  });
+});
+
+describe('paginated interview CLI', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('default interview is paginated (shows page 1)', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (1/'));
+    assert.ok(plain.includes('Directory Tree'));
+    assert.ok(plain.includes('--page 2'));
+  });
+
+  it('--page navigates to specific page', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir, '--page', '2'],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('INTERVIEW (2/'));
+  });
+
+  it('--full shows old non-paginated output', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--full', '--ext', '.ts', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Dependency Map'));
+    assert.ok(plain.includes('Interview Guide'));
+    assert.ok(!plain.includes('INTERVIEW ('));
+  });
+
+  it('last page shows interview complete', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir, '--page', '3'],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Interview complete'));
+  });
+
+  it('help text documents --page flag', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('--page'));
+    assert.ok(output.includes('paginated'));
+  });
+
+  it('help text documents --full flag', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, '--help'],
+      { encoding: 'utf8' }
+    );
+    assert.ok(output.includes('--full'));
+  });
+});
+
 describe('documentation updates', () => {
   const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
 

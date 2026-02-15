@@ -49,7 +49,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
                            ${dim}Default: JS require/import patterns (when no config).${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
                            ${dim}Can also be set in .archtest.yml scan.skip-dirs${reset}
-  --full                   Disable auto-exclusion of large directories
+  --full                   Show full interview dump ${dim}(non-paginated, all at once)${reset}
   --page <n>               Show page N of the paginated interview ${dim}(default: 1)${reset}
 
 ${bold}Scan Config:${reset} ${dim}Persist scan settings in .archtest.yml so they apply automatically.${reset}
