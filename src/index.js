@@ -526,64 +526,20 @@ function formatInterview(scan, baseDir) {
   lines.push(`${dim}${'─'.repeat(50)}${reset}`);
   lines.push('');
   lines.push(`${bold}Interview Guide${reset}`);
-  lines.push(`${dim}Use these questions to discover architectural rules with the developer.${reset}`);
   lines.push('');
-
-  lines.push(`${yellow}1. Module Boundaries${reset}`);
-  lines.push('   For each directory that has incoming dependencies:');
-  lines.push('   "Should other code import directly into this directory,');
-  lines.push('    or should it go through a barrel/index file?"');
+  lines.push(`${yellow}Your job:${reset} Read the dependency map above. Look for imports that`);
+  lines.push('cross directory boundaries. For each cross-boundary import, ask the');
+  lines.push('developer: is this intentional, or should it be forbidden?');
   lines.push('');
-
-  if (mutual.length > 0) {
-    lines.push(`${yellow}2. Bidirectional Coupling${reset}`);
-    for (const [a, b] of mutual) {
-      const labelA = a === '.' ? '(root)' : a;
-      const labelB = b === '.' ? '(root)' : b;
-      lines.push(`   "${labelA} and ${labelB} import from each other.`);
-      lines.push(`    Should one of them be independent of the other?`);
-      lines.push(`    Which direction should the dependency flow?"`);
-    }
-    lines.push('');
-  }
-
-  lines.push(`${yellow}${mutual.length > 0 ? '3' : '2'}. Layer Isolation${reset}`);
-  lines.push('   "Are there layers in this codebase (e.g., API, business logic,');
-  lines.push('    database, UI)? Should lower layers be forbidden from importing');
-  lines.push('    higher layers?"');
-  lines.push('');
-
-  lines.push(`${yellow}${mutual.length > 0 ? '4' : '3'}. External Dependencies${reset}`);
-  if (scan.externalDeps.size > 0) {
-    const heavyExternals = [...scan.externalDeps.entries()]
-      .filter(([, dirs]) => dirs.size >= 1)
-      .sort((a, b) => b[1].size - a[1].size)
-      .slice(0, 10);
-    lines.push(`   Most-used external packages:`);
-    for (const [pkg, dirs] of heavyExternals) {
-      lines.push(`     ${cyan}${pkg}${reset} ${dim}(used in ${dirs.size} director${dirs.size === 1 ? 'y' : 'ies'})${reset}`);
-    }
-    lines.push('');
-    lines.push('   "Should any of these packages be restricted to specific');
-    lines.push('    directories? For example, should database drivers only');
-    lines.push('    be imported in the database layer?"');
-  }
-  lines.push('');
-
-  lines.push(`${yellow}${mutual.length > 0 ? '5' : '4'}. Strategy & Plugin Patterns${reset}`);
-  lines.push('   "Are there parts of the codebase that are meant to be');
-  lines.push('    swappable or pluggable (strategies, adapters, providers)?');
-  lines.push('    Should they be forbidden from importing each other?"');
+  lines.push('Each confirmed violation becomes a deny rule in .archtest.yml.');
   lines.push('');
 
   lines.push(`${dim}${'─'.repeat(50)}${reset}`);
   lines.push('');
   lines.push(`${bold}Next Steps${reset}`);
-  lines.push(`  1. Discuss the questions above with the developer`);
-  lines.push(`  2. For each boundary they confirm, write an archtest rule`);
-  lines.push(`  3. Run ${cyan}archtest schema${reset} for the YAML format`);
-  lines.push(`  4. Run ${cyan}archtest examples${reset} for common rule patterns`);
-  lines.push(`  5. Save rules to ${cyan}.archtest.yml${reset} and run ${cyan}archtest${reset}`);
+  lines.push(`  1. Run ${cyan}archtest schema${reset} for the .archtest.yml format`);
+  lines.push(`  2. Run ${cyan}archtest examples${reset} for common rule patterns`);
+  lines.push(`  3. Save rules to ${cyan}.archtest.yml${reset} and run ${cyan}archtest${reset}`);
   lines.push('');
 
   return lines.join('\n');
