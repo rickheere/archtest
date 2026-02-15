@@ -6,7 +6,7 @@ const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
   formatPaginatedInterview, detectSuspiciousDirs, filterScanResults,
   walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir,
-  DEFAULT_IMPORT_PATTERNS, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES,
+  DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES, IMPORT_PATTERN_HINTS,
 } = require('./index');
 
 const dim = '\x1b[2m';
@@ -46,7 +46,7 @@ ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --skip-ext <exts>        Comma-separated extensions to exclude from scan
   --import-pattern <regex> Regex to extract imports ${dim}(capture group 1 = target)${reset}
                            ${dim}Can be repeated. Adds to patterns from .archtest.yml.${reset}
-                           ${dim}Default: JS require/import patterns (when no config).${reset}
+                           ${dim}Required when no scan.import-patterns in config.${reset}
   --skip <dirs>            Comma-separated directories to skip ${dim}(adds to defaults)${reset}
                            ${dim}Can also be set in .archtest.yml scan.skip-dirs${reset}
   --full                   Show full interview dump ${dim}(non-paginated, all at once)${reset}
@@ -265,9 +265,12 @@ Once you find the right flags, save them so future runs just work:
       import-patterns: ['import\\s+([\\w.]+)']
       skip-dirs: [build, .gradle]
 
-  ${cyan}JS/TS:${reset} ${dim}(default — no scan config needed)${reset}
+  ${cyan}JS/TS:${reset}
     scan:
       extensions: [.ts, .tsx, .js, .jsx]
+      import-patterns:
+        - "require\\\\s*\\\\(\\\\s*['\\"]([^'\\"]+)['\\"]\\\\s*\\\\)"
+        - "(?:import|export)\\\\s+.*?\\\\s+from\\\\s+['\\"]([^'\\"]+)['\\"]"
 
   ${cyan}Clojure:${reset}
     scan:
@@ -292,6 +295,10 @@ ${dim}${'─'.repeat(50)}${reset}
   ${cyan}Java:${reset}
     archtest interview --ext .java --import-pattern 'import\\s+([\\w.]+)'
 
+  ${cyan}JS/TS:${reset}
+    archtest interview --ext .ts,.tsx,.js,.jsx
+    ${dim}# → will suggest require/import patterns to add${reset}
+
 ${bold}Monorepo Setup${reset} ${dim}(per-sub-project configs)${reset}
 ${dim}${'─'.repeat(50)}${reset}
   Each sub-project gets its own .archtest.yml with scan settings.
@@ -310,7 +317,10 @@ ${dim}${'─'.repeat(50)}${reset}
 
   ${cyan}mobile/.archtest.yml:${reset}
     scan:
-      extensions: [.js, .jsx, .swift]
+      extensions: [.js, .jsx]
+      import-patterns:
+        - "require\\\\s*\\\\(\\\\s*['\\"]([^'\\"]+)['\\"]\\\\s*\\\\)"
+        - "(?:import|export)\\\\s+.*?\\\\s+from\\\\s+['\\"]([^'\\"]+)['\\"]"
     rules: []
 
   ${dim}# Interview each sub-project independently:${reset}
@@ -512,9 +522,10 @@ function runInterview(flags) {
     );
   }
 
-  // Determine effective import patterns: CLI + config (additive), or config, or defaults
+  // Determine effective import patterns: CLI + config (additive), or config, or fail
   const configPatterns = scanConfig && scanConfig.importPatterns ? scanConfig.importPatterns : [];
   let effectiveImportPatterns;
+  let noImportPatterns = false;
   if (flags.importPatternsFromCli && configPatterns.length > 0) {
     effectiveImportPatterns = [...flags.importPatterns, ...configPatterns];
   } else if (flags.importPatternsFromCli) {
@@ -522,7 +533,8 @@ function runInterview(flags) {
   } else if (configPatterns.length > 0) {
     effectiveImportPatterns = configPatterns;
   } else {
-    effectiveImportPatterns = DEFAULT_IMPORT_PATTERNS;
+    effectiveImportPatterns = [];
+    noImportPatterns = true;
   }
 
   // Determine effective skip dirs: CLI > config scan.skip-dirs > config top-level skip > defaults
@@ -601,6 +613,38 @@ function runInterview(flags) {
     console.log('');
     const topExt = extCounts.size > 0 ? [...extCounts.keys()][0] : '.js';
     console.log(`${yellow}No extensions selected.${reset} Use ${cyan}--ext ${topExt}${reset} to scan ${topExt.slice(1).toUpperCase() || 'those'} files.`);
+    console.log('');
+    return;
+  }
+
+  // No import patterns from CLI or config — detect language and show guidance, then fail
+  if (noImportPatterns) {
+    const families = detectLanguageFamilies(extCounts);
+    const detectedExts = effectiveExtensions
+      ? [...effectiveExtensions].filter((e) => LANGUAGE_FAMILIES[e])
+      : [];
+    // Find the dominant family from selected extensions, or from all detected
+    let hintFamily = null;
+    for (const ext of detectedExts) {
+      const fam = LANGUAGE_FAMILIES[ext];
+      if (fam && IMPORT_PATTERN_HINTS[fam]) { hintFamily = fam; break; }
+    }
+    if (!hintFamily) {
+      for (const fam of families) {
+        if (IMPORT_PATTERN_HINTS[fam]) { hintFamily = fam; break; }
+      }
+    }
+
+    console.log('');
+    if (hintFamily) {
+      const patterns = IMPORT_PATTERN_HINTS[hintFamily];
+      const flagStr = patterns.map((p) => `--import-pattern ${p}`).join(' ');
+      console.log(`${yellow}No import patterns configured.${reset} Detected ${cyan}${hintFamily}${reset} files — try:`);
+      console.log(`  archtest interview ${flagStr}`);
+    } else {
+      console.log(`${yellow}No import patterns configured.${reset} Add ${cyan}--import-pattern '<regex>'${reset} or set ${cyan}scan.import-patterns${reset} in .archtest.yml.`);
+      console.log(`  See ${cyan}archtest examples${reset} for Go, Python, Rust, and more.`);
+    }
     console.log('');
     return;
   }

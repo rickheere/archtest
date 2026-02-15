@@ -1,5 +1,8 @@
 scan:
   extensions: [.ts]
+  import-patterns:
+    - 'require\s*\(\s*[''"]([^''"]+)[''"]'
+    - '(?:import|export)\s+.*?\s+from\s+[''"]([^''"]+)[''"]'
   skip-dirs: [vendor]
 
 rules:

@@ -4,9 +4,21 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { parseRuleFile, resolveGlobs, checkFile, runRules, formatResults, scanCodebase, formatInterview, formatPaginatedInterview, getParentModule, getImportAnnotation, detectSuspiciousDirs, filterScanResults, walkDir, countExtensions, detectLanguageFamilies, extensionsByTopDir, resolveAliasImport, DEFAULT_SKIP_DIRS, DEFAULT_ALIASES, LANGUAGE_FAMILIES } = require('../src/index');
 
+/**
+ * JS/TS import patterns for tests.
+ * These must be passed explicitly — there is no default.
+ */
+const JS_IMPORT_PATTERNS = [
+  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /(?:import|export)\s+.*?\s+from\s+['"]([^'"]+)['"]/g,
+  /^import\s+['"]([^'"]+)['"]/gm,
+];
+
 const fixturesDir = path.join(__dirname, 'fixtures');
 const projectDir = path.join(fixturesDir, 'project');
 const JS_TS_EXT = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
+// CLI flags for JS/TS import patterns (used when no .archtest.yml config is present)
+const JS_IMPORT_FLAGS = ['--import-pattern', "require\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)", '--import-pattern', "(?:import|export)\\s+.*?\\s+from\\s+['\"]([^'\"]+)['\"]"];
 
 describe('parseRuleFile', () => {
   it('parses a valid YAML rule file', () => {
@@ -242,7 +254,7 @@ describe('DEFAULT_SKIP_DIRS', () => {
 
 describe('scanCodebase', () => {
   it('builds full directory tree with nested paths', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const dirNames = [...scan.directoryTree.keys()].sort();
     // Should have root files and nested strategy directory
     assert.ok(dirNames.includes('.'));
@@ -250,7 +262,7 @@ describe('scanCodebase', () => {
   });
 
   it('directoryTree contains filenames per directory', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     // Root should contain orchestrator.ts and utils.ts
     const rootFiles = scan.directoryTree.get('.');
     assert.ok(rootFiles.includes('orchestrator.ts'));
@@ -259,7 +271,7 @@ describe('scanCodebase', () => {
 
   it('uses subdirectory as baseDir to scope the tree', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const dirNames = [...scan.directoryTree.keys()].sort();
     // When scanning from strategies/, workshop-v3 becomes a directory
     assert.ok(dirNames.includes('workshop-v3'));
@@ -269,7 +281,7 @@ describe('scanCodebase', () => {
 
   it('returns source files under the scanned baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     assert.ok(scan.sourceFiles.length > 0);
     for (const file of scan.sourceFiles) {
       assert.ok(file.startsWith(subDir), `${file} should start with ${subDir}`);
@@ -277,7 +289,7 @@ describe('scanCodebase', () => {
   });
 
   it('builds file-level dependency map', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     // orchestrator.ts imports ./types and ./utils
     assert.ok(scan.fileDependencies.has('orchestrator.ts'));
     const deps = scan.fileDependencies.get('orchestrator.ts');
@@ -286,7 +298,7 @@ describe('scanCodebase', () => {
   });
 
   it('resolves imports to actual source files with extensions', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     // strategies/workshop-v3/index.ts imports ./strategy which should resolve to strategy.ts
     const indexDeps = scan.fileDependencies.get(path.join('strategies', 'workshop-v3', 'index.ts'));
     assert.ok(indexDeps, 'index.ts should have dependencies');
@@ -299,14 +311,14 @@ describe('scanCodebase', () => {
 
 describe('formatInterview', () => {
   it('produces output with Directory Tree section', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('Directory Tree'));
     assert.ok(output.includes('workshop-v3/'));
   });
 
   it('produces output with Dependency Map section', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('Dependency Map'));
     // Should show file-level imports
@@ -315,7 +327,7 @@ describe('formatInterview', () => {
   });
 
   it('shows file-level import arrows in dependency map', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     // orchestrator.ts imports utils.ts — should show as arrow
     assert.ok(output.includes('\u2192 utils.ts'));
@@ -323,7 +335,7 @@ describe('formatInterview', () => {
 
   it('shows clean directory labels when using subdirectory as baseDir', () => {
     const subDir = path.join(projectDir, 'strategies');
-    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(subDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, subDir);
     assert.ok(output.includes('Directory Tree'));
     assert.ok(output.includes('workshop-v3/'));
@@ -332,7 +344,7 @@ describe('formatInterview', () => {
   });
 
   it('shows source files total count', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('source files total'));
   });
@@ -344,7 +356,7 @@ describe('CLI --skip is additive', () => {
   it('--skip merges with DEFAULT_SKIP_DIRS in interview mode', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--skip', '.nauvis', '--ext', '.ts,.js', '--base-dir', projectDir],
+      [cliPath, 'interview', '--skip', '.nauvis', '--ext', '.ts,.js', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     // The output should work fine — no crash from scanning node_modules etc.
@@ -388,7 +400,7 @@ const largeProjectDir = path.join(fixturesDir, 'large-project');
 
 describe('detectSuspiciousDirs', () => {
   it('flags directories with >= 50 files', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const suspicious = detectSuspiciousDirs(scan.directoryTree);
     assert.strictEqual(suspicious.length, 1);
     assert.strictEqual(suspicious[0].dir, 'vendor');
@@ -396,13 +408,13 @@ describe('detectSuspiciousDirs', () => {
   });
 
   it('does not flag directories below threshold', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const suspicious = detectSuspiciousDirs(scan.directoryTree);
     assert.ok(!suspicious.some((s) => s.dir === 'src'));
   });
 
   it('supports custom threshold', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const suspicious = detectSuspiciousDirs(scan.directoryTree, 5);
     assert.ok(suspicious.some((s) => s.dir === 'src'));
     assert.ok(suspicious.some((s) => s.dir === 'vendor'));
@@ -419,14 +431,14 @@ describe('detectSuspiciousDirs', () => {
 
 describe('filterScanResults', () => {
   it('removes excluded directories from directoryTree', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
     assert.ok(!filtered.directoryTree.has('vendor'));
     assert.ok(filtered.directoryTree.has('src'));
   });
 
   it('removes excluded files from sourceFiles', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const filtered = filterScanResults(scan, ['vendor'], largeProjectDir);
     assert.strictEqual(filtered.sourceFiles.length, 10);
     for (const f of filtered.sourceFiles) {
@@ -435,7 +447,7 @@ describe('filterScanResults', () => {
   });
 
   it('returns original scan when excludeDirs is empty', () => {
-    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(largeProjectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const filtered = filterScanResults(scan, [], largeProjectDir);
     assert.strictEqual(filtered, scan);
   });
@@ -447,7 +459,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('auto-excludes vendor/ with warning', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--ext', '.js', ...JS_IMPORT_FLAGS, '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('Excluded: vendor/'));
@@ -458,7 +470,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('--full disables auto-exclusion', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--full', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--full', '--ext', '.js', ...JS_IMPORT_FLAGS, '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(!output.includes('Excluded:'));
@@ -469,7 +481,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('auto-excluded dir does not appear in directory tree', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--ext', '.js', ...JS_IMPORT_FLAGS, '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     // Strip ANSI codes for checking
@@ -483,7 +495,7 @@ describe('auto-exclusion in interview CLI', () => {
   it('source file count reflects only included files', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.js', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--ext', '.js', ...JS_IMPORT_FLAGS, '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     assert.ok(output.includes('10 source files total'));
@@ -543,7 +555,7 @@ describe('language-aware interview CLI', () => {
   it('shows only scanning line when --ext provided via CLI (no extension list)', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -558,7 +570,7 @@ describe('language-aware interview CLI', () => {
     // Let's scan large-project with a non-existent ext to get 0 of 70
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.xyz', '--base-dir', largeProjectDir],
+      [cliPath, 'interview', '--ext', '.xyz', ...JS_IMPORT_FLAGS, '--base-dir', largeProjectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -569,7 +581,7 @@ describe('language-aware interview CLI', () => {
   it('--skip-ext excludes extensions from scan', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts,.js', '--skip-ext', '.js', '--base-dir', projectDir],
+      [cliPath, 'interview', '--ext', '.ts,.js', '--skip-ext', '.js', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -732,26 +744,26 @@ describe('extension list filtering', () => {
 
 describe('flat dependency map (no internal/external distinction)', () => {
   it('shows all imports without (external) labels', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(!output.includes('(external)'), 'Should not contain (external) labels');
   });
 
   it('does not show Isolated Directories section', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(!output.includes('Isolated Directories'), 'Should not contain Isolated Directories section');
   });
 
   it('shows all imports as flat list in dependency map', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     // Should show resolved relative imports
     assert.ok(output.includes('\u2192 utils.ts'));
   });
 
   it('fileDependencies stores all imports in .all and resolved in .resolved', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(deps, 'orchestrator.ts should have deps');
     assert.ok(Array.isArray(deps.all), 'deps.all should be an array');
@@ -761,7 +773,7 @@ describe('flat dependency map (no internal/external distinction)', () => {
   });
 
   it('scanCodebase no longer returns externalDeps', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     assert.strictEqual(scan.externalDeps, undefined, 'externalDeps should not be in scan result');
   });
 });
@@ -936,6 +948,77 @@ describe('multi-language scoping hint', () => {
   });
 });
 
+describe('no import patterns configured', () => {
+  const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+
+  it('fails with guidance when no import patterns and --ext provided', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No import patterns configured'), 'Should show no-import-patterns message');
+    assert.ok(!plain.includes('Directory Tree'), 'Should not scan');
+  });
+
+  it('shows JS hint when JS files detected', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('js'), 'Should detect js family');
+    assert.ok(plain.includes('--import-pattern'), 'Should suggest --import-pattern flag');
+  });
+
+  it('shows Go hint when .go extension selected', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.go', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No import patterns configured'), 'Should show no-import-patterns message');
+    assert.ok(plain.includes('go'), 'Should detect go family');
+  });
+
+  it('falls back to detected language hint when unknown extension used in JS project', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.xyz', '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('No import patterns configured'));
+    // .xyz is unknown, but project has .ts files — should detect js family
+    assert.ok(plain.includes('js'), 'Should detect js from project files');
+  });
+
+  it('succeeds when import patterns provided via --import-pattern', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Directory Tree'), 'Should proceed with scan');
+    assert.ok(!plain.includes('No import patterns configured'));
+  });
+
+  it('succeeds when import patterns come from config', () => {
+    const output = execFileSync(
+      process.execPath,
+      [cliPath, 'interview', '--base-dir', configProjectDir],
+      { encoding: 'utf8' }
+    );
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plain.includes('Directory Tree'), 'Should proceed with scan from config');
+    assert.ok(!plain.includes('No import patterns configured'));
+  });
+});
+
 describe('getParentModule', () => {
   it('returns null for root directory', () => {
     assert.strictEqual(getParentModule('.'), null);
@@ -990,7 +1073,7 @@ describe('getImportAnnotation', () => {
 
 describe('scanCodebase rawImports', () => {
   it('includes rawImports with raw and resolved paths', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(deps, 'orchestrator.ts should have deps');
     assert.ok(Array.isArray(deps.rawImports), 'should have rawImports array');
@@ -1002,7 +1085,7 @@ describe('scanCodebase rawImports', () => {
   });
 
   it('preserves the raw import string from source code', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     const utilsImport = deps.rawImports.find((r) => r.resolved === 'utils.ts');
     assert.ok(utilsImport, 'Should have rawImport for utils.ts');
@@ -1012,7 +1095,7 @@ describe('scanCodebase rawImports', () => {
 
 describe('formatPaginatedInterview', () => {
   it('page 1 shows directory tree', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 1);
     assert.ok(output.includes('INTERVIEW (1/'));
     assert.ok(output.includes('Directory Tree'));
@@ -1020,20 +1103,20 @@ describe('formatPaginatedInterview', () => {
   });
 
   it('page 1 shows page count', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 1);
     assert.ok(/INTERVIEW \(1\/\d+\)/.test(output));
   });
 
   it('page 2 shows first directory detail', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 2);
     assert.ok(output.includes('INTERVIEW (2/'));
     assert.ok(/\d+ files?\)/.test(output));
   });
 
   it('last page shows interview complete', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const dirCount = scan.directoryTree.size;
     const totalPages = 1 + dirCount;
     const output = formatPaginatedInterview(scan, projectDir, totalPages);
@@ -1041,13 +1124,13 @@ describe('formatPaginatedInterview', () => {
   });
 
   it('returns error for out-of-range page', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 999);
     assert.ok(output.includes('out of range'));
   });
 
   it('shows excluded dirs warning on page 1', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const excludedDirs = [{ dir: 'vendor', count: 60 }];
     const output = formatPaginatedInterview(scan, projectDir, 1, { excludedDirs });
     assert.ok(output.includes('Excluded: vendor/'));
@@ -1055,13 +1138,13 @@ describe('formatPaginatedInterview', () => {
   });
 
   it('footer tells AI to continue with --page N+1', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 1);
     assert.ok(output.includes('--page 2'));
   });
 
   it('header frames the interview for the AI', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 1);
     assert.ok(output.includes('Discuss with the developer'));
   });
@@ -1073,7 +1156,7 @@ describe('paginated interview CLI', () => {
   it('default interview is paginated (shows page 1)', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir],
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1085,7 +1168,7 @@ describe('paginated interview CLI', () => {
   it('--page navigates to specific page', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir, '--page', '2'],
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir, '--page', '2'],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1095,7 +1178,7 @@ describe('paginated interview CLI', () => {
   it('--full shows old non-paginated output', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--full', '--ext', '.ts', '--base-dir', projectDir],
+      [cliPath, 'interview', '--full', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1107,7 +1190,7 @@ describe('paginated interview CLI', () => {
   it('last page shows interview complete', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', projectDir, '--page', '3'],
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', projectDir, '--page', '3'],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1386,7 +1469,7 @@ describe('formatPaginatedInterview', () => {
 
 describe('formatPaginatedInterview with project fixture', () => {
   it('produces valid paginated output from real scan', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatPaginatedInterview(scan, projectDir, 1);
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
     assert.ok(plain.includes('INTERVIEW (1/'));
@@ -1395,7 +1478,7 @@ describe('formatPaginatedInterview with project fixture', () => {
   });
 
   it('all pages are accessible without errors', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     // Determine total pages from page 1 output
     const page1 = formatPaginatedInterview(scan, projectDir, 1);
     const match = page1.match(/INTERVIEW \(1\/(\d+)\)/);
@@ -1413,7 +1496,7 @@ describe('formatPaginatedInterview with project fixture', () => {
 
 describe('scanCodebase rawImports tracking', () => {
   it('tracks rawImports for resolved relative imports', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(deps, 'orchestrator.ts should have deps');
     assert.ok(Array.isArray(deps.rawImports), 'Should have rawImports array');
@@ -1426,7 +1509,7 @@ describe('scanCodebase rawImports tracking', () => {
   });
 
   it('rawImports contains the original import string', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     // orchestrator.ts imports './utils' which resolves to 'utils.ts'
     const utilsImport = deps.rawImports.find((i) => i.resolved === 'utils.ts');
@@ -1435,7 +1518,7 @@ describe('scanCodebase rawImports tracking', () => {
   });
 
   it('includes non-relative imports in rawImports', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(deps, 'orchestrator.ts should have deps');
     // orchestrator.ts imports 'express' (bare module)
@@ -1445,13 +1528,13 @@ describe('scanCodebase rawImports tracking', () => {
   });
 
   it('non-relative imports appear in deps.all', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(deps.all.includes('express'), 'all should include bare module imports');
   });
 
   it('non-relative imports do NOT appear in deps.resolved', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const deps = scan.fileDependencies.get('orchestrator.ts');
     assert.ok(!deps.resolved.includes('express'), 'resolved should not include bare module imports');
   });
@@ -1459,13 +1542,13 @@ describe('scanCodebase rawImports tracking', () => {
 
 describe('all imports shown in interview output', () => {
   it('full interview shows non-relative imports', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('\u2192 express'), 'Full interview should show bare module imports');
   });
 
   it('full interview shows both relative and non-relative imports', () => {
-    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT });
+    const scan = scanCodebase(projectDir, { extensions: JS_TS_EXT, importPatterns: JS_IMPORT_PATTERNS });
     const output = formatInterview(scan, projectDir);
     assert.ok(output.includes('\u2192 utils.ts'), 'Should show resolved relative import');
     assert.ok(output.includes('\u2192 express'), 'Should show bare module import');
@@ -1478,7 +1561,7 @@ describe('paginated interview CLI', () => {
   it('default interview output is paginated (page 1)', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts,.js', '--base-dir', projectDir],
+      [cliPath, 'interview', '--ext', '.ts,.js', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1490,7 +1573,7 @@ describe('paginated interview CLI', () => {
   it('--page navigates to a specific page', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts,.js', '--base-dir', projectDir, '--page', '2'],
+      [cliPath, 'interview', '--ext', '.ts,.js', ...JS_IMPORT_FLAGS, '--base-dir', projectDir, '--page', '2'],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1500,7 +1583,7 @@ describe('paginated interview CLI', () => {
   it('--full gives the old non-paginated output', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--full', '--ext', '.ts,.js', '--base-dir', projectDir],
+      [cliPath, 'interview', '--full', '--ext', '.ts,.js', ...JS_IMPORT_FLAGS, '--base-dir', projectDir],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -1600,7 +1683,7 @@ describe('resolveAliasImport', () => {
 
 describe('scanCodebase with aliases', () => {
   it('resolves alias imports as internal dependencies with default aliases', () => {
-    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']), importPatterns: JS_IMPORT_PATTERNS });
     const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
     assert.ok(layoutDeps, 'components/Layout.ts should have dependencies');
     // ~/lib/db should resolve to lib/db.ts
@@ -1616,7 +1699,7 @@ describe('scanCodebase with aliases', () => {
   });
 
   it('tracks rawImports for alias imports', () => {
-    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']), importPatterns: JS_IMPORT_PATTERNS });
     const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
     assert.ok(layoutDeps.rawImports.length >= 2, 'Should have rawImports for alias imports');
     assert.ok(
@@ -1630,7 +1713,7 @@ describe('scanCodebase with aliases', () => {
   });
 
   it('resolves # alias imports', () => {
-    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']), importPatterns: JS_IMPORT_PATTERNS });
     const dbDeps = scan.fileDependencies.get(path.join('lib', 'db.ts'));
     assert.ok(dbDeps, 'lib/db.ts should have dependencies');
     assert.ok(
@@ -1640,7 +1723,7 @@ describe('scanCodebase with aliases', () => {
   });
 
   it('treats non-alias bare imports as external', () => {
-    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']) });
+    const scan = scanCodebase(aliasProjectDir, { extensions: new Set(['.ts']), importPatterns: JS_IMPORT_PATTERNS });
     const appDeps = scan.fileDependencies.get('app.ts');
     assert.ok(appDeps, 'app.ts should have dependencies');
     // 'react' should be in all but NOT in resolved
@@ -1657,6 +1740,7 @@ describe('scanCodebase with aliases', () => {
   it('disables aliases when set to null', () => {
     const scan = scanCodebase(aliasProjectDir, {
       extensions: new Set(['.ts']),
+      importPatterns: JS_IMPORT_PATTERNS,
       aliases: null,
     });
     const layoutDeps = scan.fileDependencies.get(path.join('components', 'Layout.ts'));
@@ -1675,6 +1759,7 @@ describe('scanCodebase with aliases', () => {
   it('uses custom aliases from options', () => {
     const scan = scanCodebase(aliasCustomProjectDir, {
       extensions: new Set(['.ts']),
+      importPatterns: JS_IMPORT_PATTERNS,
       aliases: { '@/': 'src/', '~/': 'src/' },
     });
     const buttonDeps = scan.fileDependencies.get(path.join('src', 'components', 'Button.ts'));
@@ -1700,7 +1785,7 @@ describe('interview with aliases (CLI)', () => {
   it('shows alias-resolved imports in interview output', () => {
     const output = execFileSync(
       process.execPath,
-      [cliPath, 'interview', '--ext', '.ts', '--base-dir', aliasProjectDir, '--full'],
+      [cliPath, 'interview', '--ext', '.ts', ...JS_IMPORT_FLAGS, '--base-dir', aliasProjectDir, '--full'],
       { encoding: 'utf8' }
     );
     const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
