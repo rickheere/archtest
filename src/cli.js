@@ -37,6 +37,7 @@ ${bold}Commands:${reset}
   ${cyan}examples${reset}           Show example rules for common patterns
   ${cyan}init${reset}               Generate a starter .archtest.yml
   ${cyan}interview${reset}          Scan codebase and generate an architectural interview
+  ${cyan}contribute${reset}         Show contribution guidelines (machine-readable for AI agents)
 
 ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --base-dir <path>        Set root directory for scanning ${dim}(default: cwd)${reset}
@@ -330,6 +331,68 @@ ${dim}${'─'.repeat(50)}${reset}
   ${dim}# Interview each sub-project independently:${reset}
     archtest interview --base-dir backend/
     archtest interview --base-dir mobile/
+`);
+}
+
+function showContribute() {
+  console.log(`
+${bold}Contributing to archtest${reset}
+${dim}${'─'.repeat(50)}${reset}
+
+${bold}Repository:${reset}  https://github.com/rickheere/archtest
+${bold}License:${reset}     MIT
+${bold}Deps:${reset}        js-yaml, minimatch (that's it)
+
+${bold}Structure${reset}
+
+  src/index.js   Core engine: parse, walk, check, scan, format
+  src/cli.js     CLI entry, built-in docs, subcommands
+  tests/         node:test suite with fixture projects
+
+  Two source files. Keep it that way.
+
+${bold}Setup${reset}
+
+  git clone https://github.com/rickheere/archtest.git
+  cd archtest
+  npm test
+
+  No build step. No transpilation. Plain Node.js.
+
+${bold}PR Requirements${reset}
+
+  PRs are reviewed by the maintainer's AI agent first, then by a human.
+  Structure your changes for machine review:
+
+  1. One concern per PR — don't mix features with refactors
+  2. Tests required — add/update tests in tests/ for any behavior change
+  3. npm test must pass — CI rejects failures
+  4. Commit messages — imperative mood, explain why not what
+     Good: "fix: catch multi-line Clojure imports"
+     Bad:  "updated regex"
+  5. No new dependencies without discussion
+
+${bold}Good Contributions${reset}
+
+  - New language import patterns
+    Add to IMPORT_PATTERN_HINTS in index.js + examples in cli.js
+  - Bug fixes with regression tests
+  - Performance improvements to the scanner
+  - Better interview output formatting
+
+${bold}Won't Merge${reset}
+
+  - New runtime dependencies without a strong case
+  - Anything requiring a build step
+  - Features involving network calls or external services
+  - Breaking changes to the YAML rule format without migration
+
+${bold}Testing${reset}
+
+  npm test                           # full suite
+  node --test tests/scan.test.js     # single file
+
+  Tests use node:test (built-in). Fixtures in tests/fixtures/.
 `);
 }
 
@@ -717,6 +780,7 @@ function main() {
   if (rest[0] === 'examples') return showExamples();
   if (rest[0] === 'init') return runInit();
   if (rest[0] === 'interview') return runInterview(flags);
+  if (rest[0] === 'contribute') return showContribute();
 
   let configPath = path.join(process.cwd(), '.archtest.yml');
   let verbose = false;

@@ -1,5 +1,10 @@
 # archtest
 
+[![npm version](https://img.shields.io/npm/v/@rickheere/archtest)](https://www.npmjs.com/package/@rickheere/archtest)
+[![npm downloads](https://img.shields.io/npm/dm/@rickheere/archtest)](https://www.npmjs.com/package/@rickheere/archtest)
+[![license](https://img.shields.io/npm/l/@rickheere/archtest)](https://github.com/rickheere/archtest/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/rickheere/archtest/ci.yml?label=CI)](https://github.com/rickheere/archtest/actions/workflows/ci.yml)
+
 Architectural drift detection through declarative rules. Any language with import statements.
 
 Define boundaries in YAML. Enforce them with grep. Let your AI write the rules.
@@ -17,7 +22,7 @@ So boundaries erode. With AI coding agents it's worse: they don't smell architec
 LLMs write grep patterns like humans write sentences. The LLM authors the rules, the human reviews them, the test runner executes them. The human never touches regex.
 
 <p align="center">
-  <img src="logo.jpg" alt="archtest logo" width="400">
+  <img src="logo.png" alt="archtest logo" width="400">
 </p>
 
 ## Quick Start
@@ -36,7 +41,7 @@ The agent will:
 6. Run `archtest` to verify the rules pass (or catch existing violations)
 
 <p align="center">
-  <img src="screenshot.png" alt="archtest interview output" width="700">
+  <img src="demo.gif" alt="archtest demo" width="700">
 </p>
 
 ## Manual Setup
@@ -103,7 +108,9 @@ archtest interview --ext .py \
 archtest interview --ext .kt --import-pattern 'import\s+([\w.]+)'
 
 # Clojure
-archtest interview --ext .clj --import-pattern '\[([a-z][a-z0-9.-]+\.[a-z][a-z0-9.-]+)'
+archtest interview --ext .clj \
+  --import-pattern '\[([a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+)' \
+  --import-pattern '\(([a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+)\s+[A-Z]'
 
 # Rust
 archtest interview --ext .rs --import-pattern 'use\s+([\w:]+)'

@@ -7,9 +7,14 @@ skills/
 
 # Docs & images (referenced via GitHub URLs)
 logo.jpg
+logo.png
 screenshot.png
+demo.gif
+demo.mp4
+demo.tape
 AGENTS.md
 CONTRIBUTING.md
+SECURITY.md
 
 # Tests
 tests/
