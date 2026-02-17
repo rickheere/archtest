@@ -275,7 +275,9 @@ Once you find the right flags, save them so future runs just work:
   ${cyan}Clojure:${reset}
     scan:
       extensions: [.clj, .cljs, .cljc]
-      import-patterns: ['\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)']
+      import-patterns:
+        - '\\[([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)'
+        - '\\(([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)\\s+[A-Z]'
       skip-dirs: [target, .cpcache]
 
 ${bold}Multi-Language Interview${reset} ${dim}(CLI flags — same settings, one-off)${reset}
@@ -312,7 +314,9 @@ ${dim}${'─'.repeat(50)}${reset}
   ${cyan}backend/.archtest.yml:${reset}
     scan:
       extensions: [.clj, .cljs]
-      import-patterns: ['\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)']
+      import-patterns:
+        - '\\[([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)'
+        - '\\(([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)\\s+[A-Z]'
     rules: []
 
   ${cyan}mobile/.archtest.yml:${reset}

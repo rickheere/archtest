@@ -936,7 +936,7 @@ const IMPORT_PATTERN_HINTS = {
   python:  ["'from\\s+(\\S+)\\s+import'", "'import\\s+(\\S+)'"],
   rust:    ["'use\\s+([\\w:]+)'"],
   jvm:     ["'import\\s+([\\w.]+)'"],
-  clojure: ["'\\[([a-z][a-z0-9.-]+\\.[a-z][a-z0-9.-]+)\\]'"],
+  clojure: ["'\\[([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)'", "'\\(([a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+)\\s+[A-Z]'"],
 };
 
 /**
