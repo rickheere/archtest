@@ -1,0 +1,3 @@
+# Barrier config — stops cascading lookup from reaching the repo root
+# during tests. No scan config, no rules.
+rules: []

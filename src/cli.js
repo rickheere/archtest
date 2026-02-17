@@ -602,7 +602,6 @@ function findRepoRoot(dir) {
 function loadScanConfig(baseDir) {
   const repoRoot = findRepoRoot(baseDir);
   const stopAt = repoRoot || path.parse(path.resolve(baseDir)).root;
-  const cwd = process.cwd();
 
   // Build candidate directories: baseDir → parents → stop
   const candidates = [];
@@ -613,12 +612,6 @@ function loadScanConfig(baseDir) {
     const parent = path.dirname(current);
     if (parent === current) break; // filesystem root
     current = parent;
-  }
-
-  // Add cwd if not already covered
-  const resolvedCwd = path.resolve(cwd);
-  if (!candidates.includes(resolvedCwd)) {
-    candidates.push(resolvedCwd);
   }
 
   for (const dir of candidates) {
