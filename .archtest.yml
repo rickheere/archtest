@@ -1,0 +1,48 @@
+scan:
+  extensions: [.js]
+  import-patterns:
+    - "require\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)"
+  skip-dirs: [node_modules, .nauvis, tests]
+
+rules:
+  - name: no-network-modules
+    description: "archtest must never import networking libraries"
+    scope:
+      files: ["src/**/*.js"]
+    deny:
+      patterns:
+        - "require\\s*\\(\\s*['\"]node-fetch"
+        - "require\\s*\\(\\s*['\"]axios"
+        - "require\\s*\\(\\s*['\"]got['\"]"
+        - "require\\s*\\(\\s*['\"]http['\"]"
+        - "require\\s*\\(\\s*['\"]https['\"]"
+        - "require\\s*\\(\\s*['\"]net['\"]"
+
+  - name: no-eval
+    description: "No dynamic code execution"
+    scope:
+      files: ["src/**/*.js"]
+    deny:
+      patterns:
+        - "\\beval\\s*\\("
+        - "Function\\s*\\("
+
+  - name: no-file-writes
+    description: "Core engine must not write files — archtest is read-only analysis"
+    scope:
+      files: ["src/index.js"]
+    deny:
+      patterns:
+        - "fs\\.writeFileSync"
+        - "fs\\.writeFile\\b"
+        - "fs\\.appendFile"
+        - "fs\\.mkdir"
+
+  - name: no-test-fixtures-in-source
+    description: "Source code must not import from test fixtures"
+    scope:
+      files: ["src/**/*.js"]
+    deny:
+      patterns:
+        - "require\\s*\\(.*fixtures"
+        - "require\\s*\\(.*tests/"
