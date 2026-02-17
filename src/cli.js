@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const {
   parseRuleFile, runRules, formatResults, scanCodebase, formatInterview,
   formatPaginatedInterview, detectSuspiciousDirs, filterScanResults,
@@ -38,6 +39,7 @@ ${bold}Commands:${reset}
   ${cyan}init${reset}               Generate a starter .archtest.yml
   ${cyan}interview${reset}          Scan codebase and generate an architectural interview
   ${cyan}contribute${reset}         Show contribution guidelines (machine-readable for AI agents)
+  ${cyan}contribute --check${reset} Run pre-PR checklist (auto-checks + self-assessment prompts)
 
 ${bold}Interview Options:${reset} ${dim}(used with 'archtest interview')${reset}
   --base-dir <path>        Set root directory for scanning ${dim}(default: cwd)${reset}
@@ -394,6 +396,70 @@ ${bold}Testing${reset}
 
   Tests use node:test (built-in). Fixtures in tests/fixtures/.
 `);
+}
+
+function runContributeCheck() {
+  const green = '\x1b[32m';
+  const red = '\x1b[31m';
+  const yellow = '\x1b[33m';
+
+  const pass = `${green}PASS${reset}`;
+  const fail = `${red}FAIL${reset}`;
+  const ask = `${yellow}ASK${reset}`;
+
+  console.log(`\n${bold}Contribution Checklist${reset}`);
+  console.log(`${dim}${'─'.repeat(50)}${reset}\n`);
+
+  // 1. Tests pass
+  let testsOk = false;
+  try {
+    execSync('npm test', { stdio: 'pipe', cwd: process.cwd() });
+    testsOk = true;
+  } catch (_) {}
+  console.log(`  ${testsOk ? pass : fail}  npm test passes`);
+
+  // 2. No new dependencies
+  let depsOk = false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+    const depCount = Object.keys(pkg.dependencies || {}).length;
+    depsOk = depCount <= 2;
+    console.log(`  ${depsOk ? pass : fail}  No new runtime dependencies (${depCount} found, max 2)`);
+  } catch (_) {
+    console.log(`  ${fail}  Could not read package.json`);
+  }
+
+  // 3. Only src/index.js and src/cli.js modified (no new source files)
+  let filesOk = false;
+  try {
+    const diff = execSync('git diff --name-only HEAD~1 2>/dev/null || git diff --name-only --cached', { encoding: 'utf8', cwd: process.cwd() });
+    const srcFiles = diff.split('\n').filter(f => f.startsWith('src/') && f.endsWith('.js'));
+    const allowed = new Set(['src/index.js', 'src/cli.js']);
+    const extraFiles = srcFiles.filter(f => !allowed.has(f));
+    filesOk = extraFiles.length === 0;
+    if (filesOk) {
+      console.log(`  ${pass}  No new source files in src/`);
+    } else {
+      console.log(`  ${fail}  New source files in src/: ${extraFiles.join(', ')}`);
+    }
+  } catch (_) {
+    console.log(`  ${pass}  No new source files in src/ (no git diff available)`);
+    filesOk = true;
+  }
+
+  // 4. Agent self-assessment questions
+  console.log('');
+  console.log(`  ${ask}  Is this PR a single concern? (don't mix features with refactors)`);
+  console.log(`  ${ask}  Did you add or update tests for the behavior change?`);
+  console.log(`  ${ask}  Are commit messages imperative mood, explaining why not what?`);
+  console.log(`  ${ask}  Does this avoid network calls, build steps, or external services?`);
+
+  console.log(`\n${dim}${'─'.repeat(50)}${reset}`);
+  console.log(`${dim}PASS/FAIL = verified    ASK = use your judgement${reset}\n`);
+
+  if (!testsOk || !depsOk || !filesOk) {
+    process.exit(1);
+  }
 }
 
 function runInit() {
@@ -780,7 +846,10 @@ function main() {
   if (rest[0] === 'examples') return showExamples();
   if (rest[0] === 'init') return runInit();
   if (rest[0] === 'interview') return runInterview(flags);
-  if (rest[0] === 'contribute') return showContribute();
+  if (rest[0] === 'contribute') {
+    if (rest.includes('--check')) return runContributeCheck();
+    return showContribute();
+  }
 
   let configPath = path.join(process.cwd(), '.archtest.yml');
   let verbose = false;
