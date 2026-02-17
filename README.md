@@ -30,7 +30,8 @@ LLMs write grep patterns like humans write sentences. The LLM authors the rules,
 Tell your AI coding agent:
 
 ```
-Let's set up archtest to protect our architecture. Run npx @rickheere/archtest interview to scan the codebase, then ask me about the boundaries we should enforce.
+Run npx @rickheere/archtest interview to scan our codebase,
+then ask me about the boundaries we should enforce.
 ```
 
 The agent will:
