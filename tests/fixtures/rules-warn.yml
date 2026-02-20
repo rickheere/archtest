@@ -1,0 +1,9 @@
+rules:
+  - name: no-strategy-internals-warn
+    level: warn
+    description: "Warn when strategy internals found in orchestrator"
+    scope:
+      files: ["orchestrator.ts"]
+    deny:
+      patterns:
+        - "ENTRY_1|ENTRY_2|ENTRY_3|PENDING_ENTRY"

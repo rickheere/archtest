@@ -15,7 +15,12 @@ function parseRuleFile(filePath) {
   if (!doc || !Array.isArray(doc.rules)) {
     throw new Error(`Invalid rule file: expected a "rules" array in ${filePath}`);
   }
-  const result = { rules: doc.rules };
+  const result = {
+    rules: doc.rules.map((rule) => ({
+      ...rule,
+      level: rule.level === 'warn' ? 'warn' : 'error',
+    })),
+  };
   if (Array.isArray(doc.skip)) {
     result.skip = doc.skip;
   }
@@ -174,6 +179,7 @@ function runRules(rules, baseDir, { skipDirs } = {}) {
     results.push({
       rule: rule.name,
       description: rule.description,
+      level: rule.level || 'error',
       passed: allViolations.length === 0,
       violations: allViolations,
       files: fileResults,
@@ -203,6 +209,8 @@ function formatResults(results, { verbose = false, baseDir = process.cwd() } = {
   for (const result of results) {
     if (result.passed) {
       lines.push(`  ${green}\u2713${reset}  ${result.rule}`);
+    } else if (result.level === 'warn') {
+      lines.push(`  ${yellow}\u26a0${reset}  ${result.rule}`);
     } else {
       lines.push(`  ${red}\u2717${reset}  ${result.rule}`);
     }
@@ -246,14 +254,14 @@ function formatResults(results, { verbose = false, baseDir = process.cwd() } = {
   }
 
   const passed = results.filter((r) => r.passed).length;
-  const failed = results.filter((r) => !r.passed).length;
+  const failed = results.filter((r) => !r.passed && r.level !== 'warn').length;
+  const warned = results.filter((r) => !r.passed && r.level === 'warn').length;
 
   lines.push(`${dim}${'─'.repeat(40)}${reset}`);
-  if (failed === 0) {
-    lines.push(`  ${green}${passed} passed${reset}`);
-  } else {
-    lines.push(`  ${green}${passed} passed${reset}  ${red}${failed} failed${reset}`);
-  }
+  const summaryParts = [`${green}${passed} passed${reset}`];
+  if (failed > 0) summaryParts.push(`${red}${failed} failed${reset}`);
+  if (warned > 0) summaryParts.push(`${yellow}${warned} warning${warned === 1 ? '' : 's'}${reset}`);
+  lines.push(`  ${summaryParts.join('  ')}`);
   lines.push('');
 
   return lines.join('\n');

@@ -64,6 +64,11 @@ ${bold}Import Pattern Examples:${reset} ${dim}(for non-JS/TS projects)${reset}
   ${cyan}Python:${reset} --import-pattern 'from\\s+(\\S+)\\s+import|import\\s+(\\S+)'
   ${cyan}Rust:${reset}   --import-pattern 'use\\s+([\\w:]+)'
 
+${bold}Rule Level:${reset}
+  Each rule has an optional ${cyan}level: error | warn${reset} field ${dim}(default: error).${reset}
+  ${cyan}warn${reset} rules print violations in yellow and do NOT cause exit 1.
+  Use 'warn' to document aspirational rules without breaking CI.
+
 ${yellow}AI-first architectural testing.${reset} Define boundaries in YAML, enforce
 them with grep-based pattern matching. Rules are designed to be
 authored by AI coding agents and reviewed by humans.
@@ -101,6 +106,9 @@ ${bold}rules:${reset}                           ${dim}# Required. Array of rule 
   - ${bold}name:${reset} <string>               ${dim}# Required. Unique identifier for the rule.${reset}
     ${bold}description:${reset} <string>        ${dim}# Optional. Human-readable explanation shown${reset}
                                  ${dim}# in output. Write it for humans, not machines.${reset}
+    ${bold}level:${reset} error | warn             ${dim}# Optional. Default: error.${reset}
+                                 ${dim}# warn: violations print in yellow, do NOT cause exit 1.${reset}
+                                 ${dim}# Use 'warn' for aspirational rules / work-in-progress.${reset}
 
     ${bold}scope:${reset}                       ${dim}# Required. Which files to check.${reset}
       ${bold}files:${reset}                     ${dim}# Required. Array of glob patterns.${reset}
@@ -169,8 +177,8 @@ ${dim}${'─'.repeat(50)}${reset}
 
 ${bold}Exit Codes${reset}
 ${dim}${'─'.repeat(50)}${reset}
-  ${green}0${reset}    All rules passed
-  ${yellow}1${reset}    One or more rules failed
+  ${green}0${reset}    All rules passed (or only warn-level violations)
+  ${yellow}1${reset}    One or more error-level rules failed
 `);
 }
 
@@ -238,6 +246,17 @@ ${yellow}# Prevent accidental secrets in code${reset}
   deny:
     patterns:
       - "(api_key|apikey|secret_key|password)\\\\s*[=:]\\\\s*['\"][^'\\\"]{8,}"
+
+${yellow}# Mark aspirational rules as warnings — document intent without breaking CI${reset}
+- name: no-db-in-domain-aspirational
+  level: warn
+  description: "Moving towards: domain should not import database directly"
+  scope:
+    files: ["domain/**/*.ts"]
+  deny:
+    patterns:
+      - "from ['\"].*database"
+      - "prisma|knex|sequelize"
 
 ${bold}Scan Config Examples${reset} ${dim}(persist in .archtest.yml)${reset}
 ${dim}${'─'.repeat(50)}${reset}
@@ -374,20 +393,38 @@ ${bold}PR Requirements${reset}
      Bad:  "updated regex"
   5. No new dependencies without discussion
 
-${bold}Good Contributions${reset}
+${bold}Change Impact Map${reset}
+${dim}Use this to know exactly which files and functions to touch for each type of change.${reset}
 
-  - New language import patterns
-    Add to IMPORT_PATTERN_HINTS in index.js + examples in cli.js
-  - Bug fixes with regression tests
-  - Performance improvements to the scanner
-  - Better interview output formatting
+${bold}ADDING A RULE FIELD${reset} (e.g. level, priority, tags)
+  src/index.js      parseRuleFile() — read field from YAML, add to rule object
+  src/index.js      runRules() — propagate field through result objects
+  src/cli.js        formatResults() — handle in display/output logic
+  src/cli.js        exit code logic — affect exit code if field changes behavior
+  src/cli.js        showHelp() — document field in --help output
+  src/cli.js        schema cmd — add field to schema reference output
+  src/cli.js        examples cmd — add example using the field
+  src/cli.js        contribute cmd — update this output (the file you are editing)
+  tests/index.test.js — add cases: new field behavior, default when omitted, edge cases
+  tests/fixtures/   — add a rules-*.yml fixture that exercises the field
+  README.md         — add field to rule schema table + YAML example
+  AGENTS.md         — update change impact map if needed
+  skills/archtest/SKILL.md — update schema section
 
-${bold}Won't Merge${reset}
+${bold}ADDING A CLI COMMAND OR FLAG${reset}
+  src/cli.js        implement the command/flag handler
+  src/cli.js        showHelp() — add to help output
+  src/cli.js        contribute cmd — mention it here if agent-facing
+  tests/index.test.js — test the new command/flag
+  README.md         — document it
+  AGENTS.md         — add to Getting Started if agent-facing
 
-  - New runtime dependencies without a strong case
-  - Anything requiring a build step
-  - Features involving network calls or external services
-  - Breaking changes to the YAML rule format without migration
+${bold}ADDING A LANGUAGE OR SCAN PATTERN${reset}
+  src/index.js      IMPORT_PATTERN_HINTS — add pattern hint for the language
+  src/cli.js        examples cmd — add example showing the import pattern
+  tests/index.test.js — test with a fixture file in the new language
+  tests/fixtures/   — add fixture source file for the language
+  README.md         — document the language support
 
 ${bold}Testing${reset}
 
@@ -401,12 +438,9 @@ ${bold}Testing${reset}
 function runContributeCheck() {
   const green = '\x1b[32m';
   const red = '\x1b[31m';
-  const yellow = '\x1b[33m';
 
   const pass = `${green}PASS${reset}`;
   const fail = `${red}FAIL${reset}`;
-  const ask = `${yellow}ASK${reset}`;
-
   console.log(`\n${bold}Contribution Checklist${reset}`);
   console.log(`${dim}${'─'.repeat(50)}${reset}\n`);
 
@@ -446,16 +480,6 @@ function runContributeCheck() {
     console.log(`  ${pass}  No new source files in src/ (no git diff available)`);
     filesOk = true;
   }
-
-  // 4. Agent self-assessment questions
-  console.log('');
-  console.log(`  ${ask}  Is this PR a single concern? (don't mix features with refactors)`);
-  console.log(`  ${ask}  Did you add or update tests for the behavior change?`);
-  console.log(`  ${ask}  Are commit messages imperative mood, explaining why not what?`);
-  console.log(`  ${ask}  Does this avoid network calls, build steps, or external services?`);
-
-  console.log(`\n${dim}${'─'.repeat(50)}${reset}`);
-  console.log(`${dim}PASS/FAIL = verified    ASK = use your judgement${reset}\n`);
 
   if (!testsOk || !depsOk || !filesOk) {
     process.exit(1);
@@ -879,8 +903,8 @@ function main() {
 
   console.log(output);
 
-  const hasFailed = results.some((r) => !r.passed);
-  process.exit(hasFailed ? 1 : 0);
+  const hasErrorFailed = results.some((r) => !r.passed && r.level !== 'warn');
+  process.exit(hasErrorFailed ? 1 : 0);
 }
 
 main();

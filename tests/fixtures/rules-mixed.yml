@@ -1,5 +1,6 @@
 rules:
   - name: no-console-in-utils
+    level: error
     description: "Utils should not use console.log"
     scope:
       files: ["utils.ts"]
@@ -8,6 +9,7 @@ rules:
         - "console\\.log"
 
   - name: no-strategy-internals-in-orchestrator
+    level: warn
     description: "The orchestrator must not reference strategy-specific concepts"
     scope:
       files: ["orchestrator.ts"]

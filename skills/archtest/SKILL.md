@@ -25,10 +25,14 @@ Architectural drift detection. Define boundaries in YAML, enforce with grep.
 Run `npx archtest schema` for the full YAML format reference.
 Run `npx archtest examples` for copy-pasteable rule patterns.
 
-A rule has three parts:
+A rule has these fields:
 - **name**: unique identifier
 - **scope**: which files to check (glob patterns) and which to exclude
 - **deny.patterns**: regex patterns that must NOT appear in those files
+- **level** *(optional)*: `error` (default) or `warn`
+  - `error`: violations print in red, cause exit 1 (blocks CI)
+  - `warn`: violations print in yellow, do NOT cause exit 1 (informational)
+  - Use `warn` for aspirational rules you're working towards without breaking CI
 
 The developer describes intent in plain language ("the database layer should not know about the API"). Translate that into a deny rule with the right scope and regex patterns.
 
@@ -103,7 +107,7 @@ npx archtest --skip __pycache__,.git,venv
 }
 ```
 
-Exit code 0 = all rules pass. Exit code 1 = violations found.
+Exit code 0 = all rules pass (or only `warn`-level violations). Exit code 1 = one or more `error`-level rules failed.
 
 ### When Rules Fail
 

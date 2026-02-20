@@ -94,6 +94,38 @@ rules:
 
 The `scan` section tells archtest which files to scan and how to extract imports. Both `extensions` and `import-patterns` are required. Save them in config so `archtest interview` works with no flags next time.
 
+### Rule Levels: `error` and `warn`
+
+Each rule has an optional `level` field (`error` or `warn`, default: `error`).
+
+- **`error`** (default): violations print in red with `✗`, cause exit code 1 — blocks CI
+- **`warn`**: violations print in yellow with `⚠`, do NOT cause exit code 1 — informational only
+
+Use `warn` to document aspirational rules or boundaries you're actively working towards, without breaking CI:
+
+```yaml
+rules:
+  - name: no-db-in-domain
+    description: "Domain layer must not import database modules"
+    scope:
+      files: ["domain/**/*.ts"]
+    deny:
+      patterns:
+        - "from ['"].*database"
+        - "prisma|knex|sequelize"
+
+  - name: no-db-in-domain-new-files
+    level: warn           # Working towards this — violations shown but don't fail CI
+    description: "New files in domain/ should also avoid database imports"
+    scope:
+      files: ["domain/new/**/*.ts"]
+    deny:
+      patterns:
+        - "from ['"].*database"
+```
+
+This makes it easy to adopt archtest incrementally: start with `warn` rules to see what would fail, enforce them as `error` once the violations are fixed.
+
 ## Any Language
 
 archtest works on any language with greppable import syntax. You provide `--ext` and `--import-pattern` (a regex where capture group 1 is the import target), and archtest does the rest.
